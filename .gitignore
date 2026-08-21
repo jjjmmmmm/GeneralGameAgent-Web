@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / Vue
+node_modules/
+dist/
+frontend/.vite/
+
+# 数据与模型（体积大，不入仓）
+data/
+*.mp4
+*.pt
+*.safetensors
+
+# 日志
+*.log
+*.log.err
+
+# 环境与密钥
+.env
+*.pem
+*.key
+*.p12
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store
+
+# 结果中体积大的可视化产物（保留 JSON 指标与 md）
+results/figures/*.png
