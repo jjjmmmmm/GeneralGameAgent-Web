@@ -598,21 +598,34 @@ onBeforeUnmount(() => {
   background: var(--bg-panel);
   padding: 12px 20px;
   flex-shrink: 0;
+  max-height: 220px;          /* 限制 footer 高度，防止段大图撑爆布局 */
+  overflow-y: hidden;         /* 内容超出时裁剪 */
   overflow-x: auto;
 }
 .demo-title { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
 .demo-diff { margin-left: 12px; color: var(--accent); }
-.demo-cards { display: flex; gap: 12px; }
+.demo-cards { display: flex; gap: 12px; align-items: flex-start; }
 .demo-card {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px;
   min-width: 160px;
+  max-width: 180px;
   background: var(--bg);
 }
-.demo-card.demo-wide { min-width: 260px; flex-shrink: 0; }
+.demo-card.demo-wide {
+  min-width: 240px;
+  max-width: 320px;
+  flex-shrink: 0;
+}
 .demo-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
-.demo-card img { width: 100%; border-radius: 2px; }
+.demo-card img {
+  width: 100%;
+  max-height: 140px;          /* 限制图片最大高度 */
+  object-fit: contain;        /* 保持比例 */
+  border-radius: 2px;
+  display: block;
+}
 .demo-keys { margin-top: 6px; font-size: 11px; line-height: 1.7; }
 .k-label { color: var(--text-faint); margin-right: 4px; }
 .demo-match { margin-top: 4px; font-size: 11px; color: var(--accent); }
