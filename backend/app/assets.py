@@ -139,7 +139,20 @@ def import_actions_dir(aid: str, files: list[tuple[str, bytes]]) -> dict:
         raise ValueError("未找到任何 actions_processed.parquet（请选择含 chunk_XXXX 的文件夹）")
 
     dfs.sort(key=lambda x: x[0])
-    merged = pl.concat([df for _, df in dfs])
+    # 统一列类型：j_left/j_right → List(Float64)（行内数组元素 float）；布尔键 → Int64
+    # 不同 chunk 的同名列可能类型不一致（Float64/Int64），concat 必须同构
+    norm = []
+    for _, df in dfs:
+        casts = []
+        for c in df.columns:
+            if c in ("j_left", "j_right"):
+                casts.append(pl.col(c).cast(pl.List(pl.Float64)))
+            elif c in BUTTONS:
+                casts.append(pl.col(c).cast(pl.Int64))
+        if casts:
+            df = df.with_columns(casts)
+        norm.append(df)
+    merged = pl.concat(norm)
     out = d / "actions_processed.parquet"
     merged.write_parquet(out)
 
