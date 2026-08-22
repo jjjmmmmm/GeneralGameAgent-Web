@@ -15,6 +15,9 @@ data/
 *.mp4
 *.pt
 *.safetensors
+train/cache/
+train/ckpt/
+train/_*.log
 
 # 结果集 JSON 指标入仓（build 脚本生成，可复现）；可视化 PNG 不入仓
 !backend/data/
