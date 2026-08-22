@@ -167,6 +167,8 @@ def predict(req: PredictReq) -> dict:
 class EvaluateReq(BaseModel):
     n: int = 200
     k: int = 3
+    save: bool = False          # True 时结果写入 data/results/ft.json（前端 /api/results 自动多一个版本）
+    label: str = "微调后（ft）"  # 保存时的结果集标签
 
 
 @app.post("/api/evaluate")
@@ -177,6 +179,23 @@ def evaluate(req: EvaluateReq) -> dict:
     if not inference.is_loaded():
         inference._load_session()
     try:
-        return inference.run_evaluate(n=req.n, k=req.k)
+        result = inference.run_evaluate(n=req.n, k=req.k)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"评测失败: {e}")
+
+    if req.save:
+        ft_path = RESULTS_DIR / "ft.json"
+        ft_path.write_text(json.dumps({
+            "version": "ft",
+            "label": req.label,
+            "source": "在线批量评测（Web /api/evaluate）",
+            "metrics": result["metrics"],
+            "frames": result["frames"],
+            "segments": [],   # 曲线段图沿用 baseline（未重新生成段图）
+            "demo": [],
+            "button_freq": {},
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        _cache.pop("ft", None)  # 使缓存失效，下次读取新文件
+        result["saved_as"] = "ft.json"
+
+    return result
