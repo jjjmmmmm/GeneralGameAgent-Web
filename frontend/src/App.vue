@@ -63,6 +63,7 @@
           </div>
 
           <div v-if="predictResult" class="infer-result">
+            <div class="infer-result-title num">▸ 推理结果</div>
             <div class="infer-line num">
               帧 {{ predictResult.fid }}（t={{ predictResult.sec }}s）· 推理 {{ predictResult.infer_s }}s
             </div>
@@ -189,15 +190,16 @@
             <div class="demo-match num">一致 {{ d.match }}</div>
           </div>
         </template>
-        <!-- 其他段：展示该段 top5 差异帧 -->
+        <!-- 其他段：展示该段 top5 差异帧（与左侧"段大图"对应，曲线在大图里） -->
         <template v-else>
           <div class="demo-card" v-for="(f, i) in curSeg.top5_frames" :key="'t'+i">
             <div class="demo-head">
-              <span class="num">帧 {{ f }}</span>
+              <span class="demo-rank num">#{{ i + 1 }}</span>
               <span class="num">diff {{ curSeg.top5_diffs[i].toFixed(2) }}</span>
             </div>
             <div class="demo-frame-note">
-              该段差异最大帧（曲线见上方大图）
+              <div class="num">段内帧 {{ f }}</div>
+              <div class="demo-frame-sub">该帧曲线在左侧大图中</div>
             </div>
           </div>
         </template>
@@ -548,9 +550,11 @@ onBeforeUnmount(() => {
 .btn.ghost:not(:disabled):hover { color: var(--text); border-color: var(--accent); }
 .infer-hint { font-size: 11px; color: var(--text-faint); }
 .infer-result {
-  border: 1px solid var(--border); border-radius: 4px; padding: 10px; background: var(--bg-panel);
+  border: 1px solid var(--accent); border-radius: 4px; padding: 10px;
+  background: var(--accent-dim);
   display: flex; flex-direction: column; gap: 6px;
 }
+.infer-result-title { font-size: 11px; color: var(--accent); font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
 .infer-line { font-size: 12px; color: var(--text); }
 .infer-btns { font-size: 11px; line-height: 1.7; }
 .infer-label { color: var(--text-faint); margin-right: 4px; }
@@ -598,8 +602,8 @@ onBeforeUnmount(() => {
   background: var(--bg-panel);
   padding: 12px 20px;
   flex-shrink: 0;
-  max-height: 220px;          /* 限制 footer 高度，防止段大图撑爆布局 */
-  overflow-y: hidden;         /* 内容超出时裁剪 */
+  max-height: 260px;
+  overflow-y: hidden;
   overflow-x: auto;
 }
 .demo-title { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
@@ -614,22 +618,25 @@ onBeforeUnmount(() => {
   background: var(--bg);
 }
 .demo-card.demo-wide {
-  min-width: 240px;
-  max-width: 320px;
+  min-width: 280px;
+  max-width: 360px;
   flex-shrink: 0;
 }
 .demo-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
 .demo-card img {
   width: 100%;
-  max-height: 140px;          /* 限制图片最大高度 */
-  object-fit: contain;        /* 保持比例 */
+  max-height: 180px;
+  object-fit: contain;
   border-radius: 2px;
   display: block;
+  background: var(--bg-elev);
 }
 .demo-keys { margin-top: 6px; font-size: 11px; line-height: 1.7; }
 .k-label { color: var(--text-faint); margin-right: 4px; }
 .demo-match { margin-top: 4px; font-size: 11px; color: var(--accent); }
 .demo-frame-note { font-size: 11px; color: var(--text-faint); line-height: 1.6; padding: 6px 0; }
+.demo-frame-sub { font-size: 10px; color: var(--text-faint); opacity: 0.7; margin-top: 2px; }
+.demo-rank { color: var(--accent); font-weight: 600; }
 
 @media (max-width: 1200px) {
   .body { grid-template-columns: 280px 1fr; }
