@@ -29,6 +29,13 @@ BUTTONS = [
 ]
 
 
+def meta_get(aid: str) -> dict:
+    """读素材的 meta.json。"""
+    d = _asset_dir(aid)
+    p = d / "meta.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
 def _asset_dir(aid: str) -> Path:
     d = ASSETS_DIR / aid
     if not d.is_dir():
@@ -51,6 +58,8 @@ def list_assets() -> list[dict]:
             "actions": (d / "actions_processed.parquet").exists() or (d / "actions_processed.csv").exists(),
             "frames": n_frames,
             "range": meta.get("range", None),
+            "actions_rows": meta.get("actions_rows"),  # 标注总行数
+            "actions_coverage_sec": round(meta.get("actions_rows", 0) / FPS, 1) if meta.get("actions_rows") else None,
         })
     return out
 
@@ -77,6 +86,11 @@ def save_video(aid: str, data: bytes, ext: str) -> None:
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
+def actions_rows(aid: str) -> int:
+    """素材标注总行数（=video 帧数 = 60fps × 标注覆盖秒数）。"""
+    return _load_actions(aid).height
+
+
 def save_actions(aid: str, data: bytes, ext: str) -> None:
     if ext.lower() not in ALLOWED_ACTION_EXT:
         raise ValueError(f"不支持的标注格式: {ext}")
@@ -95,6 +109,7 @@ def save_actions(aid: str, data: bytes, ext: str) -> None:
         raise ValueError(f"标注文件校验失败: {e}")
     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
     meta["actions_file"] = p.name
+    meta["actions_rows"] = df.height  # 标注行数 = 60fps × 覆盖秒数
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
@@ -138,6 +153,7 @@ def import_actions_dir(aid: str, files: list[tuple[str, bytes]]) -> dict:
     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
     meta["actions_file"] = out.name
     meta["chunks"] = [c for c, _ in dfs]
+    meta["actions_rows"] = merged.height  # 拼接后总行数
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
     return {"n_chunks": len(dfs), "rows": merged.height, "chunk_ids": [c for c, _ in dfs]}
@@ -170,6 +186,15 @@ def extract_frames(aid: str, start_sec: float, end_sec: float, fps: int = 1) -> 
     video = get_video_path(aid)
     if not video.exists():
         raise FileNotFoundError(f"素材 {aid} 未上传视频")
+
+    # 校验标注覆盖范围：end_sec×60 不能超过标注总行数
+    rows = meta_get(aid).get("actions_rows") or 0
+    if rows and end_sec * FPS > rows:
+        cover = round(rows / FPS, 1)
+        raise ValueError(
+            f"拆帧区间超出标注覆盖范围：end_sec={end_sec}s 需要 {int(end_sec*FPS)} 行，"
+            f"素材标注仅 {rows} 行（覆盖 {cover}s）。请缩小区间或上传完整标注"
+        )
 
     frames_dir = d / "frames"
     frames_dir.mkdir(exist_ok=True)

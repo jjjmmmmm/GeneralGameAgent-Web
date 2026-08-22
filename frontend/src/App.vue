@@ -134,7 +134,19 @@
           <div class="infer-row" v-if="assetReady">
             <input v-model="frameStart" class="select num" type="number" placeholder="起(秒)" />
             <input v-model="frameEnd" class="select num" type="number" placeholder="止(秒)" />
+            <select v-model="frameFps" class="select num" title="拆帧密度（视频帧率 60fps）">
+              <option :value="1">1fps</option>
+              <option :value="2">2fps</option>
+              <option :value="5">5fps</option>
+              <option :value="10">10fps</option>
+              <option :value="30">30fps</option>
+              <option :value="60">60fps(全帧)</option>
+            </select>
             <button class="btn" :disabled="assetBusy" @click="runExtract">拆帧</button>
+          </div>
+          <div v-if="assetActions && currentAssetMeta" class="infer-hint num">
+            标注覆盖 {{ currentAssetMeta.actions_rows }} 行 ≈ {{ currentAssetMeta.actions_coverage_sec }}s
+            （按 60fps 折算）
           </div>
           <div v-if="assetError" class="infer-error num">{{ assetError }}</div>
           <div v-if="assetHint" class="infer-save num">{{ assetHint }}</div>
@@ -169,8 +181,12 @@
           <div v-if="assetResults.length" class="asset-results">
             <div class="asset-result" v-for="(r, i) in assetResults" :key="i">
               <div class="infer-line num">
-                帧 {{ r.sec }}s · gt[{{ r.buttons.gt.join(',') || '无' }}] pred[{{ r.buttons.pred.join(',') || '无' }}]
-                · {{ r.buttons.n_correct }}/17 · MSE {{ r.j_left.mse.toFixed(4) }}
+                帧 {{ r.sec }}s
+                <span v-if="r.gt_available === false" class="infer-error">· 标注不覆盖此帧</span>
+                <template v-else>
+                  · gt[{{ r.buttons.gt.join(',') || '无' }}] pred[{{ r.buttons.pred.join(',') || '无' }}]
+                  · {{ r.buttons.n_correct }}/17 · MSE {{ r.j_left.mse.toFixed(4) }}
+                </template>
               </div>
             </div>
           </div>
@@ -504,10 +520,12 @@ const assetActions = ref(false)
 const assetReady = computed(() => !!assetId.value && assetVideo.value && assetActions.value)
 const frameStart = ref('0')
 const frameEnd = ref('60')
+const frameFps = ref(1)
 const assetFrames = ref(0)          // 帧数量（帧索引 1 基：1..assetFrames）
 const selectedFrames = ref(new Set())
 const frameSpec = ref('')
 const assetResults = ref([])
+const currentAssetMeta = computed(() => assetList.value.find(x => x.id === assetId.value) || null)
 
 async function loadAssets() {
   assetList.value = await api.assets()
@@ -605,7 +623,7 @@ async function runExtract() {
   selectedFrames.value = new Set()
   assetResults.value = []
   try {
-    const r = await api.extractFrames(assetId.value, Number(frameStart.value), Number(frameEnd.value), 1)
+    const r = await api.extractFrames(assetId.value, Number(frameStart.value), Number(frameEnd.value), Number(frameFps.value))
     assetFrames.value = r.n_frames
     await loadAssets()
   } catch (e) {

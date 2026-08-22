@@ -115,24 +115,23 @@ def _chunk_df(cid: str) -> pl.DataFrame:
     return _chunk_cache[cid]
 
 
-def get_gt(fid: int, asset: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
+def get_gt(fid: int, asset: dict | None = None) -> tuple[np.ndarray | None, np.ndarray | None]:
     """按帧号取标注：17 键按钮 + j_left[-1,1]。
 
     asset=None → 课程默认 SHARD（帧号=chunk×1200+行号）；
     asset 提供 → 从素材 parquet 按行读取（行号 = 秒×60 或显式 row）。
+    越界时返回 (None, None)，由 predict_fid 标记 gt_available=False。
     """
     if asset is None:
         cid = f"{fid // CHUNK_SIZE:04d}"
         row = fid % CHUNK_SIZE
         df = _chunk_df(cid)
-        r = df.slice(row, 1)
     else:
         row = asset.get("row", int(asset["sec"] * FPS))
         df = asset["df"]
-        n = df.height
-        if row >= n:
-            raise IndexError(f"帧号超标注范围: {row} >= {n}")
-        r = df.slice(row, 1)
+    if row >= df.height:
+        return None, None  # 标注不覆盖此帧
+    r = df.slice(row, 1)
     btn17 = np.array([int(r[b].item()) for b in BUTTONS], dtype=int)
     jl = np.array(r["j_left"].to_list()[0], dtype=float)
     return btn17, jl
@@ -164,25 +163,27 @@ def predict_fid(fid: int, k: int = 1, asset: dict | None = None) -> dict:
     )
     pred_jl = last_pred["j_left"][PRED_ROW].astype(float)
 
-    n_gt = int(gt_btn17.sum())
+    n_gt = int(gt_btn17.sum()) if gt_btn17 is not None else None
     n_pred = int(pred_btn17.sum())
-    n_both = int(((pred_btn17 == 1) & (gt_btn17 == 1)).sum())
-    n_correct = int((pred_btn17 == gt_btn17).sum())
-    accuracy = n_correct / len(BUTTONS)
-    jl_mse = float(np.mean((pred_jl - gt_jl) ** 2))
+    n_both = int(((pred_btn17 == 1) & (gt_btn17 == 1)).sum()) if gt_btn17 is not None else None
+    n_correct = int((pred_btn17 == gt_btn17).sum()) if gt_btn17 is not None else None
+    accuracy = n_correct / len(BUTTONS) if n_correct is not None else None
+    jl_mse = float(np.mean((pred_jl - gt_jl) ** 2)) if gt_jl is not None else None
 
     return {
         "fid": fid,
         "sec": round(asset["sec"], 2) if asset else round(fid / FPS, 2),
         "infer_s": round(dt, 3),
+        "gt_available": gt_btn17 is not None,
         "buttons": {
-            "gt": [b for b, v in zip(BUTTONS, gt_btn17) if v],
+            "gt": [b for b, v in zip(BUTTONS, gt_btn17) if v] if gt_btn17 is not None else [],
             "pred": [b for b, v in zip(BUTTONS, pred_btn17) if v],
             "n_gt": n_gt, "n_pred": n_pred, "n_both": n_both,
             "n_correct": n_correct, "accuracy": accuracy,
         },
         "j_left": {
-            "gt": gt_jl.tolist(), "pred": pred_jl.tolist(),
+            "gt": gt_jl.tolist() if gt_jl is not None else None,
+            "pred": pred_jl.tolist(),
             "mse": jl_mse,
         },
     }
