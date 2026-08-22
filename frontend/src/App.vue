@@ -16,7 +16,7 @@
     </header>
 
     <main class="body">
-      <!-- 左：指标区 -->
+      <!-- 左：指标区 + 在线推理 -->
       <section class="panel metrics-panel">
         <div class="panel-head">
           <h2>M4 指标</h2>
@@ -45,9 +45,63 @@
           按键事件 · pred {{ metricsData.metrics.events.pred }} / gt {{ metricsData.metrics.events.gt }} / both {{ metricsData.metrics.events.both }}
           <br/>更新于 {{ updatedAt || '—' }}（指标为固定评测结果，重载刷新数据源）
         </div>
+
+        <!-- 在线推理 -->
+        <div class="panel-head infer-head">
+          <h2>在线推理</h2>
+          <span class="infer-status num" :class="{ on: modelLoaded }">
+            {{ modelLoaded ? '模型就绪' : '模型未加载' }}
+          </span>
+        </div>
+        <div class="infer-body">
+          <div class="infer-row">
+            <input v-model="predictFid" class="select num" type="number" min="0" placeholder="帧号(如 38400)" />
+            <button class="btn" :disabled="running" @click="runPredict">单帧推理</button>
+          </div>
+          <div class="infer-hint num" v-if="!modelLoaded">
+            首次推理将加载模型（约 9s），请稍候
+          </div>
+
+          <div v-if="predictResult" class="infer-result">
+            <div class="infer-line num">
+              帧 {{ predictResult.fid }}（t={{ predictResult.sec }}s）· 推理 {{ predictResult.infer_s }}s
+            </div>
+            <div class="infer-btns">
+              <span class="infer-label">gt</span>
+              <span class="key-chip" v-for="k in predictResult.buttons.gt" :key="'g'+k">{{ k }}</span>
+              <span v-if="!predictResult.buttons.gt.length" class="key-empty num">无</span>
+            </div>
+            <div class="infer-btns">
+              <span class="infer-label">pred</span>
+              <span class="key-chip" v-for="k in predictResult.buttons.pred" :key="'p'+k">{{ k }}</span>
+              <span v-if="!predictResult.buttons.pred.length" class="key-empty num">无</span>
+            </div>
+            <div class="infer-meta num">
+              按键 {{ predictResult.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ predictResult.j_left.mse.toFixed(4) }}
+            </div>
+          </div>
+          <div v-if="predictError" class="infer-error num">{{ predictError }}</div>
+
+          <div class="infer-row batch-row">
+            <button class="btn" :disabled="running" @click="runEvaluate">批量评测 200 帧（K=3）</button>
+            <button class="btn ghost" :disabled="running || !evalDone" @click="saveFt">保存为 ft 结果</button>
+          </div>
+          <div v-if="evaluateResult" class="infer-result">
+            <div class="infer-line num">
+              评测完成 · {{ evaluateResult.frames.length }} 帧 · 耗时 {{ evaluateResult.metrics.total_s }}s
+            </div>
+            <div class="infer-meta num">
+              准确率 {{ (evaluateResult.metrics.btn_accuracy * 100).toFixed(1) }}% ·
+              召回 {{ (evaluateResult.metrics.recall * 100).toFixed(1) }}% ·
+              摇杆相关 {{ evaluateResult.metrics.jl_corr.toFixed(3) }}
+            </div>
+          </div>
+          <div v-if="evalError" class="infer-error num">{{ evalError }}</div>
+          <div v-if="saveMsg" class="infer-save num">{{ saveMsg }}</div>
+        </div>
       </section>
 
-      <!-- 右：曲线工作区 -->
+      <!-- 右：曲线工作区（双图：总曲线 + 分段图） -->
       <section class="panel viewer-panel">
         <div class="panel-head">
           <h2>动作曲线</h2>
@@ -64,9 +118,9 @@
         </div>
 
         <div class="viewer-main">
+          <!-- 左：段信息 -->
           <div v-if="curSeg" class="seg-info">
             <div class="seg-thumb">
-              <!-- :key + 时间戳：切换段时强制重新加载对应曲线图，避免浏览器复用旧图 -->
               <img
                 :key="curSeg.file + '-' + segIdx"
                 :src="`/api/figures/curves/${curSeg.file}?t=${curSeg.start}`"
@@ -74,7 +128,7 @@
               />
             </div>
             <div class="seg-top5">
-              <div class="top5-title">Top5 差异帧</div>
+              <div class="top5-title">Top5 差异帧（该段）</div>
               <table class="top5-table">
                 <thead><tr><th>帧</th><th>差异</th></tr></thead>
                 <tbody>
@@ -87,41 +141,73 @@
             </div>
           </div>
 
-          <div class="chart-wrap">
-            <div ref="chartEl" class="chart"></div>
+          <!-- 右：总曲线 + 分段图 -->
+          <div class="charts-col">
+            <div class="chart-wrap">
+              <div ref="chartEl" class="chart chart-total"></div>
+            </div>
+            <div class="chart-wrap">
+              <div ref="segChartEl" class="chart chart-seg"></div>
+            </div>
           </div>
         </div>
       </section>
     </main>
 
-    <!-- 底部：演示帧 -->
-    <footer class="demo-strip" v-if="demo.length">
-      <div class="demo-title">演示 · 视频 60–64s 人类标注 vs 模型预测</div>
+    <!-- 底部：随段变化的演示条 -->
+    <footer class="demo-strip" v-if="curSeg">
+      <div class="demo-title">
+        当前段 {{ curSeg.start }}s–{{ curSeg.end }}s · {{ curSeg.file }}
+        <span class="demo-diff num">最大差异 {{ maxDiff.toFixed(2) }}</span>
+      </div>
       <div class="demo-cards">
-        <div class="demo-card" v-for="d in demo" :key="d.frame">
-          <div class="demo-head">
-            <span class="num">{{ d.frame }}</span>
-            <span class="num">t={{ d.sec }}s</span>
-          </div>
-          <img :src="`/api/figures/demo/${d.image}`" :alt="d.frame" />
-          <div class="demo-keys">
-            <span class="k-label">gt</span>
-            <span class="key-chip" v-for="k in d.gt_keys" :key="'g'+k">{{ k }}</span>
-            <span v-if="!d.gt_keys.length" class="key-empty num">无</span>
-            <br/>
-            <span class="k-label">pred</span>
-            <span class="key-chip" v-for="k in d.pred_keys" :key="'p'+k">{{ k }}</span>
-            <span v-if="!d.pred_keys.length" class="key-empty num">无</span>
-          </div>
-          <div class="demo-match num">一致 {{ d.match }}</div>
+        <!-- 段曲线大图 -->
+        <div class="demo-card demo-wide">
+          <img
+            :key="'big-' + curSeg.file"
+            :src="`/api/figures/curves/${curSeg.file}?t=${curSeg.start}`"
+            :alt="curSeg.file"
+          />
         </div>
+        <!-- 若该段覆盖 60–64s（M5 演示段），追加演示帧对比 -->
+        <template v-if="curSeg.start === 60">
+          <div class="demo-card" v-for="d in demo" :key="d.frame">
+            <div class="demo-head">
+              <span class="num">{{ d.frame }}</span>
+              <span class="num">t={{ d.sec }}s</span>
+            </div>
+            <img :src="`/api/figures/demo/${d.image}`" :alt="d.frame" />
+            <div class="demo-keys">
+              <span class="k-label">gt</span>
+              <span class="key-chip" v-for="k in d.gt_keys" :key="'g'+k">{{ k }}</span>
+              <span v-if="!d.gt_keys.length" class="key-empty num">无</span>
+              <br/>
+              <span class="k-label">pred</span>
+              <span class="key-chip" v-for="k in d.pred_keys" :key="'p'+k">{{ k }}</span>
+              <span v-if="!d.pred_keys.length" class="key-empty num">无</span>
+            </div>
+            <div class="demo-match num">一致 {{ d.match }}</div>
+          </div>
+        </template>
+        <!-- 其他段：展示该段 top5 差异帧 -->
+        <template v-else>
+          <div class="demo-card" v-for="(f, i) in curSeg.top5_frames" :key="'t'+i">
+            <div class="demo-head">
+              <span class="num">帧 {{ f }}</span>
+              <span class="num">diff {{ curSeg.top5_diffs[i].toFixed(2) }}</span>
+            </div>
+            <div class="demo-frame-note">
+              该段差异最大帧（曲线见上方大图）
+            </div>
+          </div>
+        </template>
       </div>
     </footer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { api } from './lib/api'
 
@@ -134,9 +220,22 @@ const apiOk = ref(false)
 const loadError = ref('')
 const updatedAt = ref('')
 const segIdx = ref(0)
-const chartEl = ref(null)
 
+// 在线推理状态
+const modelLoaded = ref(false)
+const running = ref(false)
+const predictFid = ref(38400)
+const predictResult = ref(null)
+const predictError = ref('')
+const evaluateResult = ref(null)
+const evalError = ref('')
+const evalDone = ref(false)
+const saveMsg = ref('')
+
+const chartEl = ref(null)
+const segChartEl = ref(null)
 let chart = null
+let segChart = null
 
 const metricCards = computed(() => {
   if (!metricsData.value) return []
@@ -166,18 +265,21 @@ const maxDiff = computed(() => {
 async function loadAll() {
   try {
     loadError.value = ''
-    const [health, metrics, segs, fr, dem] = await Promise.all([
+    const [health, metrics, segs, fr, dem, status] = await Promise.all([
       api.health(), api.metrics(version.value),
       api.segments(version.value), api.frames(version.value, 200),
-      api.demo(version.value),
+      api.demo(version.value), api.inferStatus(),
     ])
     apiOk.value = health.ok
     metricsData.value = metrics
     segments.value = segs
     frames.value = fr
     demo.value = dem
+    modelLoaded.value = status.loaded
     updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    await nextTick()
     renderChart()
+    renderSegChart()
   } catch (e) {
     apiOk.value = false
     loadError.value = `无法加载数据：${e.message ?? e}`
@@ -185,7 +287,7 @@ async function loadAll() {
 }
 
 function renderChart() {
-  // 主曲线图 = 测试集 200 帧逐帧指标曲线（保留原始设计）
+  // 总曲线 = 测试集 200 帧逐帧指标
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
   if (!frames.value.length) return
@@ -195,17 +297,17 @@ function renderChart() {
   chart.setOption({
     backgroundColor: 'transparent',
     title: {
-      text: '测试集 200 帧逐帧指标（摇杆 MSE / 按键准确率）',
+      text: '总览 · 测试集 200 帧逐帧指标',
       left: 'center', top: 2,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
     },
-    grid: { left: 52, right: 68, top: 36, bottom: 30 },
+    grid: { left: 52, right: 68, top: 36, bottom: 26 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
       textStyle: { color: '#d7dde4', fontSize: 12 },
     },
-    legend: { top: 18, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
+    legend: { top: 16, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
     xAxis: {
       type: 'category', data: x, name: '帧号',
       nameTextStyle: { color: '#56606d', fontSize: 10 },
@@ -229,10 +331,100 @@ function renderChart() {
   }, true)
 }
 
-function reload() { loadAll() }
-function onResize() { chart?.resize() }
+function renderSegChart() {
+  // 分段图 = 当前所选段的 top5 差异柱状图（随段切换变化）
+  if (!segChartEl.value) return
+  if (!segChart) segChart = echarts.init(segChartEl.value)
+  const s = curSeg.value
+  if (!s) return
+  segChart.setOption({
+    backgroundColor: 'transparent',
+    title: {
+      text: `分段 · ${s.start}s–${s.end}s 差异 top5`,
+      left: 'center', top: 2,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
+    },
+    grid: { left: 44, right: 16, top: 36, bottom: 26 },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
+      textStyle: { color: '#d7dde4', fontSize: 12 },
+      formatter: p => `帧 ${p[0].name} · diff ${p[0].value.toFixed(2)}`,
+    },
+    xAxis: {
+      type: 'category', data: s.top5_frames.map(f => `帧 ${f}`),
+      axisLabel: { color: '#56606d', fontSize: 10 },
+      axisLine: { lineStyle: { color: '#2a333f' } },
+    },
+    yAxis: {
+      type: 'value', name: 'diff', nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+    },
+    series: [{
+      name: 'diff', type: 'bar', data: s.top5_diffs, barWidth: '45%',
+      itemStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: '#4fd1c5' }, { offset: 1, color: 'rgba(79,209,197,0.25)' }],
+        },
+        borderRadius: [3, 3, 0, 0],
+      },
+    }],
+  }, true)
+}
 
-watch(segIdx, () => { /* 段切换：左侧缩略图/top5 表已由 :key 与 curSeg 联动刷新，主图为测试集全量曲线不变 */ })
+// ===== 在线推理 =====
+async function runPredict() {
+  running.value = true
+  predictError.value = ''
+  predictResult.value = null
+  try {
+    predictResult.value = await api.predict(Number(predictFid.value), 1)
+    modelLoaded.value = true
+  } catch (e) {
+    predictError.value = e.message ?? String(e)
+  } finally {
+    running.value = false
+  }
+}
+
+async function runEvaluate() {
+  running.value = true
+  evalError.value = ''
+  evaluateResult.value = null
+  evalDone.value = false
+  try {
+    evaluateResult.value = await api.evaluate(200, 3, false)
+    modelLoaded.value = true
+    evalDone.value = true
+    saveMsg.value = ''
+  } catch (e) {
+    evalError.value = e.message ?? String(e)
+  } finally {
+    running.value = false
+  }
+}
+
+async function saveFt() {
+  saveMsg.value = ''
+  try {
+    await api.evaluate(200, 3, true, '微调后（ft）')
+    saveMsg.value = '已保存 ft.json → /api/results 现含 ft 版本'
+  } catch (e) {
+    saveMsg.value = '保存失败: ' + (e.message ?? e)
+  }
+}
+
+function reload() { loadAll() }
+function onResize() {
+  chart?.resize()
+  segChart?.resize()
+}
+
+watch(segIdx, async () => {
+  await nextTick()
+  renderSegChart()
+})
 
 onMounted(() => {
   loadAll()
@@ -241,6 +433,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
+  segChart?.dispose()
 })
 </script>
 
@@ -288,7 +481,7 @@ onBeforeUnmount(() => {
 .body {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 320px 1fr;
   gap: 0;
   min-height: 0;
 }
@@ -338,6 +531,36 @@ onBeforeUnmount(() => {
 .empty { padding: 24px 16px; color: var(--text-faint); text-align: center; }
 .empty.err { color: var(--fail); }
 
+/* ===== 在线推理 ===== */
+.infer-head { border-top: 1px solid var(--border); }
+.infer-status { font-size: 11px; color: var(--text-faint); }
+.infer-status.on { color: var(--ok); }
+.infer-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.infer-row { display: flex; gap: 8px; }
+.infer-row input { flex: 1; min-width: 0; }
+.btn {
+  background: var(--accent); color: #06231f; border: none; border-radius: 4px;
+  padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: var(--sans);
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.ghost { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); }
+.btn.ghost:not(:disabled):hover { color: var(--text); border-color: var(--accent); }
+.infer-hint { font-size: 11px; color: var(--text-faint); }
+.infer-result {
+  border: 1px solid var(--border); border-radius: 4px; padding: 10px; background: var(--bg-panel);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.infer-line { font-size: 12px; color: var(--text); }
+.infer-btns { font-size: 11px; line-height: 1.7; }
+.infer-label { color: var(--text-faint); margin-right: 4px; }
+.infer-meta { font-size: 11px; color: var(--accent); }
+.infer-error { font-size: 11px; color: var(--fail); }
+.infer-save { font-size: 11px; color: var(--ok); }
+.batch-row { margin-top: 2px; }
+.key-chip { background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; margin-right: 3px; font-size: 10px; }
+.key-empty { color: var(--text-faint); }
+
 /* ===== 查看器 ===== */
 .viewer-panel { border-right: none; }
 .viewer-controls { display: flex; align-items: center; gap: 10px; }
@@ -350,7 +573,7 @@ onBeforeUnmount(() => {
 .viewer-main {
   flex: 1;
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 16px;
   padding: 16px;
   min-height: 0;
@@ -363,8 +586,11 @@ onBeforeUnmount(() => {
 .top5-table th { text-align: left; color: var(--text-faint); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .top5-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
 
-.chart-wrap { min-height: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); }
-.chart { width: 100%; height: 100%; min-height: 300px; }
+.charts-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.chart-wrap { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); }
+.chart { width: 100%; height: 100%; }
+.chart-total { min-height: 220px; }
+.chart-seg { min-height: 220px; }
 
 /* ===== 演示条 ===== */
 .demo-strip {
@@ -375,6 +601,7 @@ onBeforeUnmount(() => {
   overflow-x: auto;
 }
 .demo-title { font-size: 11px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+.demo-diff { margin-left: 12px; color: var(--accent); }
 .demo-cards { display: flex; gap: 12px; }
 .demo-card {
   border: 1px solid var(--border);
@@ -383,17 +610,19 @@ onBeforeUnmount(() => {
   min-width: 160px;
   background: var(--bg);
 }
+.demo-card.demo-wide { min-width: 260px; flex-shrink: 0; }
 .demo-head { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
 .demo-card img { width: 100%; border-radius: 2px; }
 .demo-keys { margin-top: 6px; font-size: 11px; line-height: 1.7; }
 .k-label { color: var(--text-faint); margin-right: 4px; }
-.key-chip { background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px; margin-right: 3px; font-size: 10px; }
-.key-empty { color: var(--text-faint); }
 .demo-match { margin-top: 4px; font-size: 11px; color: var(--accent); }
+.demo-frame-note { font-size: 11px; color: var(--text-faint); line-height: 1.6; padding: 6px 0; }
 
-@media (max-width: 1100px) {
-  .body { grid-template-columns: 240px 1fr; }
+@media (max-width: 1200px) {
+  .body { grid-template-columns: 280px 1fr; }
   .viewer-main { grid-template-columns: 1fr; }
+  .seg-info { flex-direction: row; flex-wrap: wrap; }
+  .seg-thumb { flex: 1; min-width: 200px; }
 }
 @media (max-width: 800px) {
   .body { grid-template-columns: 1fr; overflow-y: auto; }
