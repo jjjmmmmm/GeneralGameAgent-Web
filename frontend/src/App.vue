@@ -43,6 +43,7 @@
 
         <div class="panel-foot num" v-if="metricsData">
           按键事件 · pred {{ metricsData.metrics.events.pred }} / gt {{ metricsData.metrics.events.gt }} / both {{ metricsData.metrics.events.both }}
+          <br/>更新于 {{ updatedAt || '—' }}（指标为固定评测结果，重载刷新数据源）
         </div>
       </section>
 
@@ -65,7 +66,8 @@
         <div class="viewer-main">
           <div v-if="curSeg" class="seg-info">
             <div class="seg-thumb">
-              <img :src="`/api/figures/curves/${curSeg.file}`" :alt="curSeg.file" />
+              <!-- :key 强制切换段时重新加载对应曲线图，避免浏览器复用旧图 -->
+              <img :key="curSeg.file" :src="`/api/figures/curves/${curSeg.file}`" :alt="curSeg.file" />
             </div>
             <div class="seg-top5">
               <div class="top5-title">Top5 差异帧</div>
@@ -126,6 +128,7 @@ const frames = ref([])
 const demo = ref([])
 const apiOk = ref(false)
 const loadError = ref('')
+const updatedAt = ref('')
 const segIdx = ref(0)
 const chartEl = ref(null)
 
@@ -169,47 +172,66 @@ async function loadAll() {
     segments.value = segs
     frames.value = fr
     demo.value = dem
-    renderChart()
+    updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    renderSegChart()
   } catch (e) {
     apiOk.value = false
     loadError.value = `无法加载数据：${e.message ?? e}`
   }
 }
 
-function renderChart() {
+function renderSegChart() {
+  // 主曲线图 = 当前所选段的 top5 差异柱状图（随段切换变化）
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
-  // 用 200 帧评测明细的摇杆/按键误差曲线
-  const x = frames.value.map(f => f.fid)
-  const jl = frames.value.map(f => f.jl_mse)
-  const acc = frames.value.map(f => f.accuracy)
+  const s = curSeg.value
+  if (!s) return
+  const topFrames = s.top5_frames
+  const topDiffs = s.top5_diffs
   chart.setOption({
     backgroundColor: 'transparent',
-    grid: { left: 52, right: 68, top: 40, bottom: 30 },
-    tooltip: { trigger: 'axis', backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a', textStyle: { color: '#d7dde4', fontSize: 12 } },
-    legend: { top: 4, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
-    xAxis: { type: 'category', data: x, axisLabel: { color: '#56606d', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a333f' } } },
-    yAxis: [
-      {
-        type: 'value', name: 'MSE', nameTextStyle: { color: '#56606d', fontSize: 11 },
-        axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+    title: {
+      text: `${s.start}s–${s.end}s · 差异 top5`,
+      left: 'center', top: 4,
+      textStyle: { color: '#8b97a5', fontSize: 12, fontWeight: 500 },
+    },
+    grid: { left: 48, right: 20, top: 44, bottom: 30 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
+      textStyle: { color: '#d7dde4', fontSize: 12 },
+      formatter: p => `帧 ${p[0].name} · diff ${p[0].value.toFixed(2)}`,
+    },
+    xAxis: {
+      type: 'category',
+      data: topFrames.map(f => `帧 ${f}`),
+      axisLabel: { color: '#56606d', fontSize: 10 },
+      axisLine: { lineStyle: { color: '#2a333f' } },
+    },
+    yAxis: {
+      type: 'value', name: 'diff', nameTextStyle: { color: '#56606d', fontSize: 11 },
+      axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+    },
+    series: [{
+      name: 'diff', type: 'bar',
+      data: topDiffs,
+      barWidth: '45%',
+      itemStyle: {
+        color: {
+          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{ offset: 0, color: '#4fd1c5' }, { offset: 1, color: 'rgba(79,209,197,0.25)' }],
+        },
+        borderRadius: [3, 3, 0, 0],
       },
-      {
-        type: 'value', name: '准确率', nameGap: 20, nameTextStyle: { color: '#56606d', fontSize: 11 },
-        axisLabel: { color: '#56606d', fontSize: 10, formatter: v => (v * 100) + '%' }, splitLine: { show: false },
-      },
-    ],
-    series: [
-      { name: 'j_left MSE', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#4fd1c5' }, data: jl, yAxisIndex: 0 },
-      { name: '按键准确率', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#e6b45c' }, data: acc, yAxisIndex: 1 },
-    ],
+    }],
   }, true)
 }
 
 function reload() { loadAll() }
 function onResize() { chart?.resize() }
 
-watch(segIdx, () => { /* 段选择 → 未来切换图（当前展示同一张评测曲线 + 段图） */ })
+watch(segIdx, renderSegChart)
 
 onMounted(() => {
   loadAll()
