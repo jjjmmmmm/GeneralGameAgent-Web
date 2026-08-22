@@ -73,11 +73,22 @@ def test_figure_png():
 
 
 def test_figure_curves_subdir():
-    r = client.get("/api/figures/seq_060.png")
+    r = client.get("/api/figures/curves/seq_060.png")
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
 
 
 def test_figure_missing_404():
     r = client.get("/api/figures/no_such.png")
+    assert r.status_code == 404
+
+
+def test_figure_demo_subpath():
+    r = client.get("/api/figures/demo/seq01_f0.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+
+
+def test_figure_traversal_blocked():
+    r = client.get("/api/figures/../results/baseline.json")
     assert r.status_code == 404

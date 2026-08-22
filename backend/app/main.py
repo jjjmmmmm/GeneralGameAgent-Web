@@ -111,12 +111,12 @@ def get_demo(version: str = "baseline") -> dict:
     return {"version": version, "demo": data.get("demo", [])}
 
 
-@app.get("/api/figures/{name}")
+@app.get("/api/figures/{name:path}")
 def get_figure(name: str) -> FileResponse:
-    p = FIGURES_DIR / name
-    if not p.exists():
-        p = FIGURES_DIR / "curves" / name
-    if not p.exists():
+    """返回静态图。name 支持子路径（如 demo/seq01_f0.png、curves/seq_060.png）。"""
+    p = (FIGURES_DIR / name).resolve()
+    # 防目录穿越：必须仍在 FIGURES_DIR 内
+    if not p.is_relative_to(FIGURES_DIR.resolve()) or not p.is_file():
         raise HTTPException(status_code=404, detail=f"未找到图: {name}")
     return FileResponse(p, media_type="image/png")
 
