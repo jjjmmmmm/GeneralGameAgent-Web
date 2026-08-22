@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import metrics_lib
+from . import inference, metrics_lib
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RESULTS_DIR = DATA_DIR / "results"
@@ -129,3 +129,54 @@ class HealthResp(BaseModel):
 @app.get("/api/health")
 def health() -> HealthResp:
     return HealthResp(status="ok", versions=[v["version"] for v in _list_versions()])
+
+
+# ===== 在线推理（用户 2026-08-22 确认：懒加载 + 集成进 FastAPI）=====
+
+class PredictReq(BaseModel):
+    fid: int | None = None          # 视频帧号（优先）
+    sec: float | None = None        # 或秒数（可选）
+    k: int = 1                      # 推理次数（多数票，flow matching 随机性控制）
+
+
+@app.get("/api/infer/status")
+def infer_status() -> dict:
+    """模型加载状态（懒加载 → 前端显示"加载中/就绪"）。"""
+    return {"loaded": inference.is_loaded()}
+
+
+@app.post("/api/predict")
+def predict(req: PredictReq) -> dict:
+    """单帧在线推理：抽帧 → K 次多数票 → pred vs gt 对比。"""
+    if req.fid is None:
+        if req.sec is None:
+            raise HTTPException(status_code=400, detail="需提供 fid 或 sec")
+        fid = int(round(req.sec * inference.FPS))
+    else:
+        fid = req.fid
+
+    if not inference.is_loaded():
+        inference._load_session()  # 首次加载（约 30s，单请求内阻塞）
+    try:
+        result = inference.predict_fid(fid, k=req.k)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"推理失败: {e}")
+    return result
+
+
+class EvaluateReq(BaseModel):
+    n: int = 200
+    k: int = 3
+
+
+@app.post("/api/evaluate")
+def evaluate(req: EvaluateReq) -> dict:
+    """批量评测测试集（n 帧，K 多数票），返回 metrics（可存为 ft 结果）。"""
+    if req.n < 1 or req.n > 3600:
+        raise HTTPException(status_code=400, detail="n 需在 1~3600")
+    if not inference.is_loaded():
+        inference._load_session()
+    try:
+        return inference.run_evaluate(n=req.n, k=req.k)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"评测失败: {e}")
