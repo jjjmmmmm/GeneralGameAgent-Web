@@ -185,13 +185,19 @@ function renderChart() {
   const acc = frames.value.map(f => f.accuracy)
   chart.setOption({
     backgroundColor: 'transparent',
-    grid: { left: 48, right: 24, top: 36, bottom: 28 },
+    grid: { left: 52, right: 68, top: 40, bottom: 30 },
     tooltip: { trigger: 'axis', backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a', textStyle: { color: '#d7dde4', fontSize: 12 } },
     legend: { top: 4, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
     xAxis: { type: 'category', data: x, axisLabel: { color: '#56606d', fontSize: 10 }, axisLine: { lineStyle: { color: '#2a333f' } } },
     yAxis: [
-      { type: 'value', name: 'MSE', nameTextStyle: { color: '#56606d' }, axisLabel: { color: '#56606d' }, splitLine: { lineStyle: { color: '#1c242e' } } },
-      { type: 'value', name: '准确率', min: 0, max: 1, axisLabel: { color: '#56606d', formatter: v => (v * 100) + '%' }, splitLine: { show: false } },
+      {
+        type: 'value', name: 'MSE', nameTextStyle: { color: '#56606d', fontSize: 11 },
+        axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+      },
+      {
+        type: 'value', name: '准确率', nameGap: 20, nameTextStyle: { color: '#56606d', fontSize: 11 },
+        axisLabel: { color: '#56606d', fontSize: 10, formatter: v => (v * 100) + '%' }, splitLine: { show: false },
+      },
     ],
     series: [
       { name: 'j_left MSE', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#4fd1c5' }, data: jl, yAxisIndex: 0 },
