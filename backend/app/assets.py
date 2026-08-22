@@ -132,7 +132,7 @@ def extract_frames(aid: str, start_sec: float, end_sec: float, fps: int = 1) -> 
     for old in frames_dir.glob("f*.png"):
         old.unlink()
 
-    # 用 ffmpeg 每秒抽 1 帧（fps 参数：每 f 秒抽 1 帧；用 fps=1 时 -vf fps=1）
+    # 用 ffmpeg 按 fps 抽帧（fps=1 → 每秒 1 帧）
     out_pattern = str(frames_dir / "f%d.png")
     subprocess.run(
         ["ffmpeg", "-v", "error", "-y",
@@ -143,19 +143,23 @@ def extract_frames(aid: str, start_sec: float, end_sec: float, fps: int = 1) -> 
         check=True, capture_output=True,
     )
 
-    fids = sorted(int(p.stem[1:]) for p in frames_dir.glob("f*.png"))
-    if not fids:
+    # 帧名 = 1 基索引（f1.png, f2.png, ...）；每帧绝对秒 = start + (idx-1)/fps
+    files = list(frames_dir.glob("f*.png"))
+    if not files:
         raise RuntimeError("拆帧结果为空（检查区间是否超出视频时长）")
+    fids = sorted(int(p.stem[1:]) for p in files)  # 数字排序，保证 f1,f2,...f10
+    frame_secs = {idx: round(start_sec + (idx - 1) / fps, 3) for idx in fids}
 
     meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
     meta["range"] = {"start": start_sec, "end": end_sec, "fps": fps}
+    meta["frame_secs"] = {str(k): v for k, v in frame_secs.items()}
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
     return {
         "asset_id": aid,
         "range": {"start": start_sec, "end": end_sec, "fps": fps},
         "n_frames": len(fids),
-        "fids": fids,  # 帧号列表（秒×60）
+        "fids": fids,  # 帧索引（1 基）
     }
 
 

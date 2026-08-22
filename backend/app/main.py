@@ -146,27 +146,37 @@ def infer_status() -> dict:
     return {"loaded": inference.is_loaded()}
 
 
-def _resolve_asset(asset_id: str | None, sec: float | None) -> tuple[dict | None, float | None]:
-    """asset_id → asset dict；同时从素材拆帧结果查绝对秒。"""
+def _resolve_asset(asset_id: str | None, fid: int | None) -> tuple[dict | None, int | None]:
+    """asset_id → asset dict；素材帧用拆帧索引 fid（1 基）查绝对秒。"""
     if asset_id is None:
-        return None, sec
+        return None, fid
     asset = inference.load_asset(asset_id)
     meta = json.loads((assets.ASSETS_DIR / asset_id / "meta.json").read_text(encoding="utf-8"))
-    asset["sec"] = sec
-    return asset, sec
+    frame_secs = meta.get("frame_secs", {})
+    sec = frame_secs.get(str(fid))
+    if sec is None:
+        raise HTTPException(status_code=400, detail=f"素材中不存在帧索引 {fid}（先拆帧）")
+    asset["sec"] = float(sec)
+    return asset, fid
 
 
 @app.post("/api/predict")
 def predict(req: PredictReq) -> dict:
-    """单帧在线推理：抽帧 → K 次多数票 → pred vs gt 对比。"""
-    if req.fid is None:
-        if req.sec is None:
-            raise HTTPException(status_code=400, detail="需提供 fid 或 sec")
-        fid = int(round(req.sec * inference.FPS))
-    else:
-        fid = req.fid
+    """单帧在线推理：抽帧 → K 次多数票 → pred vs gt 对比。
 
-    asset, sec = _resolve_asset(req.asset_id, req.sec)
+    asset_id 提供 → fid 是素材拆帧索引（1 基），秒从 frame_secs 查；
+    否则 fid 是课程全局帧号（秒=fid/60）或 sec 直接给秒。
+    """
+    if req.asset_id:
+        if req.fid is None:
+            raise HTTPException(status_code=400, detail="素材推理需提供 fid（拆帧索引）")
+        asset, fid = _resolve_asset(req.asset_id, req.fid)
+        sec = None
+    else:
+        asset = None
+        fid = req.fid if req.fid is not None else int(round((req.sec or 0) * inference.FPS))
+        sec = req.sec
+
     if not inference.is_loaded():
         inference._load_session()  # 首次加载（约 30s，单请求内阻塞）
     try:
@@ -191,20 +201,20 @@ def evaluate(req: EvaluateReq) -> dict:
     asset = None
     if req.asset_id:
         asset = inference.load_asset(req.asset_id)
-        # 素材帧：由拆帧的索引列表 → (fid=索引, sec=绝对秒)
+        # 素材帧：由拆帧索引列表 → (fid=索引, sec=绝对秒, row=行号)
         meta = json.loads((assets.ASSETS_DIR / req.asset_id / "meta.json").read_text(encoding="utf-8"))
-        rng = meta.get("range", {})
-        fps = rng.get("fps", 1)
-        start = rng.get("start", 0)
+        frame_secs = meta.get("frame_secs", {})
         fids = req.fids if req.fids else []
         if not fids:
             raise HTTPException(status_code=400, detail="素材评测需提供 fids（拆帧索引）")
-        asset["frames"] = [
-            {"fid": idx, "sec": start + idx / fps}
-            for idx in fids
-        ]
+        asset["frames"] = []
+        for idx in fids:
+            sec = frame_secs.get(str(idx))
+            if sec is None:
+                raise HTTPException(status_code=400, detail=f"素材中不存在帧索引 {idx}（先拆帧）")
+            asset["frames"].append({"fid": idx, "sec": float(sec)})
 
-    if req.n < 1 or req.n > 3600 and asset is None:
+    if asset is None and (req.n < 1 or req.n > 3600):
         raise HTTPException(status_code=400, detail="n 需在 1~3600")
     if not inference.is_loaded():
         inference._load_session()
