@@ -66,8 +66,12 @@
         <div class="viewer-main">
           <div v-if="curSeg" class="seg-info">
             <div class="seg-thumb">
-              <!-- :key 强制切换段时重新加载对应曲线图，避免浏览器复用旧图 -->
-              <img :key="curSeg.file" :src="`/api/figures/curves/${curSeg.file}`" :alt="curSeg.file" />
+              <!-- :key + 时间戳：切换段时强制重新加载对应曲线图，避免浏览器复用旧图 -->
+              <img
+                :key="curSeg.file + '-' + segIdx"
+                :src="`/api/figures/curves/${curSeg.file}?t=${curSeg.start}`"
+                :alt="curSeg.file"
+              />
             </div>
             <div class="seg-top5">
               <div class="top5-title">Top5 差异帧</div>
@@ -173,65 +177,62 @@ async function loadAll() {
     frames.value = fr
     demo.value = dem
     updatedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    renderSegChart()
+    renderChart()
   } catch (e) {
     apiOk.value = false
     loadError.value = `无法加载数据：${e.message ?? e}`
   }
 }
 
-function renderSegChart() {
-  // 主曲线图 = 当前所选段的 top5 差异柱状图（随段切换变化）
+function renderChart() {
+  // 主曲线图 = 测试集 200 帧逐帧指标曲线（保留原始设计）
   if (!chartEl.value) return
   if (!chart) chart = echarts.init(chartEl.value)
-  const s = curSeg.value
-  if (!s) return
-  const topFrames = s.top5_frames
-  const topDiffs = s.top5_diffs
+  if (!frames.value.length) return
+  const x = frames.value.map(f => f.fid)
+  const jl = frames.value.map(f => f.jl_mse)
+  const acc = frames.value.map(f => f.accuracy)
   chart.setOption({
     backgroundColor: 'transparent',
     title: {
-      text: `${s.start}s–${s.end}s · 差异 top5`,
-      left: 'center', top: 4,
-      textStyle: { color: '#8b97a5', fontSize: 12, fontWeight: 500 },
+      text: '测试集 200 帧逐帧指标（摇杆 MSE / 按键准确率）',
+      left: 'center', top: 2,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
     },
-    grid: { left: 48, right: 20, top: 44, bottom: 30 },
+    grid: { left: 52, right: 68, top: 36, bottom: 30 },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
       textStyle: { color: '#d7dde4', fontSize: 12 },
-      formatter: p => `帧 ${p[0].name} · diff ${p[0].value.toFixed(2)}`,
     },
+    legend: { top: 18, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
     xAxis: {
-      type: 'category',
-      data: topFrames.map(f => `帧 ${f}`),
-      axisLabel: { color: '#56606d', fontSize: 10 },
+      type: 'category', data: x, name: '帧号',
+      nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 9 },
       axisLine: { lineStyle: { color: '#2a333f' } },
     },
-    yAxis: {
-      type: 'value', name: 'diff', nameTextStyle: { color: '#56606d', fontSize: 11 },
-      axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
-    },
-    series: [{
-      name: 'diff', type: 'bar',
-      data: topDiffs,
-      barWidth: '45%',
-      itemStyle: {
-        color: {
-          type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [{ offset: 0, color: '#4fd1c5' }, { offset: 1, color: 'rgba(79,209,197,0.25)' }],
-        },
-        borderRadius: [3, 3, 0, 0],
+    yAxis: [
+      {
+        type: 'value', name: 'MSE', nameTextStyle: { color: '#56606d', fontSize: 10 },
+        axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
       },
-    }],
+      {
+        type: 'value', name: '准确率', nameGap: 16, nameTextStyle: { color: '#56606d', fontSize: 10 },
+        axisLabel: { color: '#56606d', fontSize: 10, formatter: v => (v * 100) + '%' }, splitLine: { show: false },
+      },
+    ],
+    series: [
+      { name: 'j_left MSE', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#4fd1c5' }, data: jl, yAxisIndex: 0 },
+      { name: '按键准确率', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#e6b45c' }, data: acc, yAxisIndex: 1 },
+    ],
   }, true)
 }
 
 function reload() { loadAll() }
 function onResize() { chart?.resize() }
 
-watch(segIdx, renderSegChart)
+watch(segIdx, () => { /* 段切换：左侧缩略图/top5 表已由 :key 与 curSeg 联动刷新，主图为测试集全量曲线不变 */ })
 
 onMounted(() => {
   loadAll()
