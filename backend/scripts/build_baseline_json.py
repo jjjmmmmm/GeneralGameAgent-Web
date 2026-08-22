@@ -27,6 +27,14 @@ def parse_pct(s: str) -> float:
     return float(s.strip().rstrip("%")) / 100.0
 
 
+def strip_md(s: str) -> str:
+    """去掉 markdown 标记（反引号、加粗、✅/❌ 高亮符号）。"""
+    s = re.sub(r"`([^`]*)`", r"\1", s)
+    s = re.sub(r"\*\*([^*]*)\*\*", r"\1", s)
+    s = s.replace("✅", "").replace("❌", "").strip()
+    return s
+
+
 def parse_metrics(md: str) -> dict:
     def grab(pattern: str) -> str:
         m = re.search(pattern, md)
@@ -118,7 +126,7 @@ def parse_curves(md: str) -> list[dict]:
                 continue
             start, end, file, top5, vals = cells[:5]
             segs.append({
-                "start": int(start), "end": int(end), "file": file,
+                "start": int(start), "end": int(end), "file": strip_md(file),
                 "top5_frames": [int(x) for x in re.findall(r"\d+", top5)],
                 "top5_diffs": [float(x) for x in re.findall(r"[\d.]+", vals)],
             })
@@ -140,9 +148,9 @@ def parse_demo(md: str) -> list[dict]:
                 continue
             frame, sec, img, gt, pred, stick, match = cells[:7]
             demo.append({
-                "frame": frame, "sec": int(sec.rstrip("s")), "image": img,
-                "gt_keys": [k.strip() for k in gt.split(",") if k.strip()],
-                "pred_keys": [k.strip() for k in pred.split(",") if k.strip() and k != "（无）"],
+                "frame": frame, "sec": int(sec.rstrip("s")), "image": strip_md(img),
+                "gt_keys": [strip_md(k) for k in gt.split(",") if k.strip()],
+                "pred_keys": [strip_md(k) for k in pred.split(",") if k.strip() and k != "（无）"],
                 "stick": stick, "match": match,
             })
     return demo

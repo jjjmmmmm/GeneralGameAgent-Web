@@ -2971,7 +2971,7 @@
     {
       "frame": "f0",
       "sec": 60,
-      "image": "`seq01_f0.png`",
+      "image": "seq01_f0.png",
       "gt_keys": [
         "dpad_left",
         "right_trigger"
@@ -2983,7 +2983,7 @@
     {
       "frame": "f1",
       "sec": 61,
-      "image": "`seq01_f1.png`",
+      "image": "seq01_f1.png",
       "gt_keys": [
         "dpad_left",
         "right_trigger"
@@ -2997,13 +2997,13 @@
     {
       "frame": "f2",
       "sec": 62,
-      "image": "`seq01_f2.png`",
+      "image": "seq01_f2.png",
       "gt_keys": [
         "dpad_left",
         "right_trigger"
       ],
       "pred_keys": [
-        "**right_trigger** ✅"
+        "right_trigger"
       ],
       "stick": "(-0.87, 0.06) → (-0.71, 0.09)",
       "match": "16/17"
@@ -3011,7 +3011,7 @@
     {
       "frame": "f3",
       "sec": 63,
-      "image": "`seq01_f3.png`",
+      "image": "seq01_f3.png",
       "gt_keys": [
         "dpad_left"
       ],
@@ -3024,7 +3024,7 @@
     {
       "frame": "f4",
       "sec": 64,
-      "image": "`seq01_f4.png`",
+      "image": "seq01_f4.png",
       "gt_keys": [
         "dpad_left",
         "right_trigger"
