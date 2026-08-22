@@ -280,6 +280,20 @@ async def upload_actions(aid: str, file: UploadFile = File(...)) -> dict:
     return {"asset_id": aid, "actions": True}
 
 
+@app.post("/api/assets/{aid}/actions-dir")
+async def upload_actions_dir(aid: str, files: list[UploadFile] = File(...)) -> dict:
+    """文件夹上传标注：接收多个 parquet（文件名保留相对路径含 chunk_id）。"""
+    collected = []
+    for f in files:
+        data = await f.read()
+        collected.append((f.filename or "", data))
+    try:
+        result = assets.import_actions_dir(aid, collected)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"asset_id": aid, "actions": True, **result}
+
+
 class ExtractReq(BaseModel):
     start_sec: float
     end_sec: float

@@ -123,7 +123,10 @@
               视频<input type="file" accept="video/*" @change="onVideoFile" hidden />
             </label>
             <label class="upload-btn">
-              标注(parquet)<input type="file" accept=".parquet,.csv,.tsv" @change="onActionsFile" hidden />
+              标注(文件夹)<input type="file" webkitdirectory multiple @change="onActionsDir" hidden />
+            </label>
+            <label class="upload-btn">
+              标注(单文件)<input type="file" accept=".parquet,.csv,.tsv" @change="onActionsFile" hidden />
             </label>
             <span class="infer-hint num">{{ assetReady ? '视频✓ 标注✓' : (assetVideo ? '视频✓' : '') }}</span>
           </div>
@@ -134,6 +137,7 @@
             <button class="btn" :disabled="assetBusy" @click="runExtract">拆帧</button>
           </div>
           <div v-if="assetError" class="infer-error num">{{ assetError }}</div>
+          <div v-if="assetHint" class="infer-save num">{{ assetHint }}</div>
 
           <!-- 帧网格（1 基索引：第 1 帧=f1） -->
           <div v-if="assetFrames" class="frame-grid">
@@ -494,6 +498,7 @@ const assetId = ref('')
 const assetName = ref('')
 const assetBusy = ref(false)
 const assetError = ref('')
+const assetHint = ref('')
 const assetVideo = ref(false)
 const assetActions = ref(false)
 const assetReady = computed(() => !!assetId.value && assetVideo.value && assetActions.value)
@@ -568,6 +573,24 @@ async function onActionsFile(e) {
     await api.uploadActions(assetId.value, file)
     assetActions.value = true
     await loadAssets()
+  } catch (err) {
+    assetError.value = err.message ?? String(err)
+  } finally {
+    assetBusy.value = false
+    e.target.value = ''
+  }
+}
+
+async function onActionsDir(e) {
+  const files = e.target.files ? [...e.target.files] : []
+  if (!files.length) return
+  assetBusy.value = true
+  assetError.value = ''
+  try {
+    const r = await api.uploadActionsDir(assetId.value, files)
+    assetActions.value = true
+    await loadAssets()
+    assetHint.value = `已导入 ${r.n_chunks} 个 chunk（${r.rows} 行标注）`
   } catch (err) {
     assetError.value = err.message ?? String(err)
   } finally {

@@ -42,6 +42,19 @@ export const api = {
   createAsset: (name) => post('/api/assets', { name }).then(d => d.asset_id),
   uploadVideo: (aid, file) => upload(`/api/assets/${aid}/video`, file),
   uploadActions: (aid, file) => upload(`/api/assets/${aid}/actions`, file),
+  uploadActionsDir: async (aid, files) => {
+    // 文件夹上传：files 为选中文件夹里的文件列表，逐个追加（浏览器会带相对路径 webkitRelativePath）
+    const form = new FormData()
+    const actionFiles = files.filter(f => f.name === 'actions_processed.parquet')
+    if (!actionFiles.length) throw new Error('文件夹中未找到 actions_processed.parquet')
+    for (const f of actionFiles) form.append('files', f, f.webkitRelativePath || f.name)
+    const r = await fetch(`${BASE}/api/assets/${aid}/actions-dir`, { method: 'POST', body: form })
+    if (!r.ok) {
+      const detail = await r.json().then(j => j.detail).catch(() => '')
+      throw new Error(`actions-dir → ${r.status}${detail ? ': ' + detail : ''}`)
+    }
+    return r.json()
+  },
   extractFrames: (aid, startSec, endSec, fps = 1) =>
     post(`/api/assets/${aid}/frames`, { start_sec: startSec, end_sec: endSec, fps }),
   deleteAsset: (aid) => fetch(`${BASE}/api/assets/${aid}`, { method: 'DELETE' }).then(r => r.json()),

@@ -98,6 +98,51 @@ def save_actions(aid: str, data: bytes, ext: str) -> None:
     (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
 
+def import_actions_dir(aid: str, files: list[tuple[str, bytes]]) -> dict:
+    """从文件夹导入标注：接收多个 actions_processed.parquet（文件名含 chunk_id）。
+
+    files = [(相对路径如 'Z1r1S--MJS4_chunk_0000/actions_processed.parquet', bytes), ...]
+    按 chunk_id 排序拼接成一个连续标注（row = 秒×60 对齐完整视频）。
+    """
+    d = _asset_dir(aid)
+    dfs = []
+    for rel, data in files:
+        m = re.search(r"chunk_(\d{4})", rel)
+        if not m or not rel.endswith("actions_processed.parquet"):
+            continue  # 只收 actions_processed，跳过 raw/metadata
+        cid = int(m.group(1))
+        tmp = d / f"_chunk_{cid:04d}.parquet"
+        tmp.write_bytes(data)
+        try:
+            df = pl.read_parquet(tmp)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            continue
+        tmp.unlink()
+        dfs.append((cid, df))
+    if not dfs:
+        raise ValueError("未找到任何 actions_processed.parquet（请选择含 chunk_XXXX 的文件夹）")
+
+    dfs.sort(key=lambda x: x[0])
+    merged = pl.concat([df for _, df in dfs])
+    out = d / "actions_processed.parquet"
+    merged.write_parquet(out)
+
+    # 校验
+    missing = [c for c in BUTTONS if c not in merged.columns] + ["j_left", "j_right"]
+    missing = [c for c in missing if c not in merged.columns]
+    if missing:
+        out.unlink(missing_ok=True)
+        raise ValueError(f"标注缺少列: {missing}")
+
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    meta["actions_file"] = out.name
+    meta["chunks"] = [c for c, _ in dfs]
+    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+    return {"n_chunks": len(dfs), "rows": merged.height, "chunk_ids": [c for c, _ in dfs]}
+
+
 def _load_actions(aid: str) -> pl.DataFrame:
     d = _asset_dir(aid)
     for cand in (d / "actions_processed.parquet", d / "actions_processed.csv", d / "actions_processed.tsv"):
