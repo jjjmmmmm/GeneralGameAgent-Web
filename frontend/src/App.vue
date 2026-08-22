@@ -100,6 +100,77 @@
           <div v-if="evalError" class="infer-error num">{{ evalError }}</div>
           <div v-if="saveMsg" class="infer-save num">{{ saveMsg }}</div>
         </div>
+
+        <!-- 素材评测工作台 -->
+        <div class="panel-head infer-head">
+          <h2>素材评测</h2>
+          <span class="infer-status num">{{ assetId ? '素材: ' + assetId.slice(0, 8) : '未选素材' }}</span>
+        </div>
+        <div class="infer-body">
+          <div class="infer-row">
+            <input v-model="assetName" class="select" placeholder="素材名称" />
+            <button class="btn ghost" :disabled="assetBusy" @click="createAsset">新建</button>
+            <select v-model="assetId" class="select" @change="onAssetChange">
+              <option value="" disabled>选择素材</option>
+              <option v-for="a in assetList" :key="a.id" :value="a.id">
+                {{ a.name }}（{{ a.frames }} 帧）
+              </option>
+            </select>
+          </div>
+
+          <div class="upload-row" v-if="assetId">
+            <label class="upload-btn">
+              视频<input type="file" accept="video/*" @change="onVideoFile" hidden />
+            </label>
+            <label class="upload-btn">
+              标注(parquet)<input type="file" accept=".parquet,.csv,.tsv" @change="onActionsFile" hidden />
+            </label>
+            <span class="infer-hint num">{{ assetReady ? '视频✓ 标注✓' : (assetVideo ? '视频✓' : '') }}</span>
+          </div>
+
+          <div class="infer-row" v-if="assetReady">
+            <input v-model="frameStart" class="select num" type="number" placeholder="起(秒)" />
+            <input v-model="frameEnd" class="select num" type="number" placeholder="止(秒)" />
+            <button class="btn" :disabled="assetBusy" @click="runExtract">拆帧</button>
+          </div>
+          <div v-if="assetError" class="infer-error num">{{ assetError }}</div>
+
+          <!-- 帧网格（1 基索引：第 1 帧=f1） -->
+          <div v-if="assetFrames" class="frame-grid">
+            <div
+              v-for="i in assetFrames"
+              :key="i"
+              class="frame-cell"
+              :class="{ sel: selectedFrames.has(i) }"
+              @click="toggleFrame(i)"
+            >
+              <img :src="`/api/assets/${assetId}/frames/f${i}.png`" :alt="`帧${i}`" loading="lazy" />
+              <span class="num">{{ i }}</span>
+            </div>
+          </div>
+
+          <!-- 帧选择 + 推理 -->
+          <div v-if="assetFrames" class="infer-row batch-row">
+            <input v-model="frameSpec" class="select num" placeholder="如 1~20 或 1,3,5" />
+            <button class="btn ghost" :disabled="assetBusy" @click="selectBySpec">按区间选</button>
+          </div>
+          <div v-if="assetFrames" class="infer-row">
+            <button class="btn" :disabled="assetBusy || !selectedFrames.size" @click="runAssetPredict">
+              推理选中 {{ selectedFrames.size }} 帧
+            </button>
+            <button class="btn ghost" :disabled="assetBusy || !selectedFrames.size" @click="runAssetBatch">
+              批量对比
+            </button>
+          </div>
+          <div v-if="assetResults.length" class="asset-results">
+            <div class="asset-result" v-for="(r, i) in assetResults" :key="i">
+              <div class="infer-line num">
+                帧 {{ r.sec }}s · gt[{{ r.buttons.gt.join(',') || '无' }}] pred[{{ r.buttons.pred.join(',') || '无' }}]
+                · {{ r.buttons.n_correct }}/17 · MSE {{ r.j_left.mse.toFixed(4) }}
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- 右：曲线工作区（双图：总曲线 + 分段图） -->
@@ -417,6 +488,171 @@ async function saveFt() {
   }
 }
 
+// ===== 素材评测工作台 =====
+const assetList = ref([])
+const assetId = ref('')
+const assetName = ref('')
+const assetBusy = ref(false)
+const assetError = ref('')
+const assetVideo = ref(false)
+const assetActions = ref(false)
+const assetReady = computed(() => !!assetId.value && assetVideo.value && assetActions.value)
+const frameStart = ref('0')
+const frameEnd = ref('60')
+const assetFrames = ref(0)          // 帧数量（帧索引 1 基：1..assetFrames）
+const selectedFrames = ref(new Set())
+const frameSpec = ref('')
+const assetResults = ref([])
+
+async function loadAssets() {
+  assetList.value = await api.assets()
+}
+
+async function createAsset() {
+  assetBusy.value = true
+  assetError.value = ''
+  try {
+    assetId.value = await api.createAsset(assetName.value || '新素材')
+    await loadAssets()
+    await onAssetChange()
+  } catch (e) {
+    assetError.value = e.message ?? String(e)
+  } finally {
+    assetBusy.value = false
+  }
+}
+
+async function onAssetChange() {
+  assetError.value = ''
+  assetFrames.value = 0
+  selectedFrames.value = new Set()
+  assetResults.value = []
+  if (!assetId.value) return
+  const a = assetList.value.find(x => x.id === assetId.value)
+  assetVideo.value = a?.video ?? false
+  assetActions.value = a?.actions ?? false
+  if (assetVideo.value && assetActions.value) {
+    await refreshFrames()
+  }
+}
+
+async function refreshFrames() {
+  const a = assetList.value.find(x => x.id === assetId.value)
+  assetFrames.value = a?.frames ?? 0
+  if (assetFrames.value) frameSpec.value = ''
+}
+
+async function onVideoFile(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  assetBusy.value = true
+  assetError.value = ''
+  try {
+    await api.uploadVideo(assetId.value, file)
+    assetVideo.value = true
+    await loadAssets()
+  } catch (err) {
+    assetError.value = err.message ?? String(err)
+  } finally {
+    assetBusy.value = false
+    e.target.value = ''
+  }
+}
+
+async function onActionsFile(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  assetBusy.value = true
+  assetError.value = ''
+  try {
+    await api.uploadActions(assetId.value, file)
+    assetActions.value = true
+    await loadAssets()
+  } catch (err) {
+    assetError.value = err.message ?? String(err)
+  } finally {
+    assetBusy.value = false
+    e.target.value = ''
+  }
+}
+
+async function runExtract() {
+  assetBusy.value = true
+  assetError.value = ''
+  selectedFrames.value = new Set()
+  assetResults.value = []
+  try {
+    const r = await api.extractFrames(assetId.value, Number(frameStart.value), Number(frameEnd.value), 1)
+    assetFrames.value = r.n_frames
+    await loadAssets()
+  } catch (e) {
+    assetError.value = e.message ?? String(e)
+  } finally {
+    assetBusy.value = false
+  }
+}
+
+function toggleFrame(i) {
+  const s = new Set(selectedFrames.value)
+  s.has(i) ? s.delete(i) : s.add(i)
+  selectedFrames.value = s
+}
+
+function selectBySpec() {
+  // spec 是 1 基索引（1~20 → 拆出的第1~20帧）
+  const idxs = (frameSpec.value || '').split(',').map(s => s.trim()).filter(Boolean).flatMap(part => {
+    const m = part.match(/^(\d+)(?:~|-)(\d+)$/)
+    if (m) {
+      const a = +m[1], b = +m[2]
+      return Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => Math.min(a, b) + i)
+    }
+    return [+part]
+  }).filter(i => i >= 1 && i <= assetFrames.value)
+  selectedFrames.value = new Set(idxs)
+}
+
+async function runAssetPredict() {
+  assetBusy.value = true
+  assetError.value = ''
+  assetResults.value = []
+  try {
+    const out = []
+    for (const idx of [...selectedFrames.value].sort((a, b) => a - b)) {
+      // 素材帧：fid=idx（1 基拆帧索引），秒由后端 frame_secs 反推
+      const r = await api.predict(idx, 1, assetId.value, null)
+      out.push({ ...r, frameIdx: idx })
+    }
+    assetResults.value = out
+  } catch (e) {
+    assetError.value = e.message ?? String(e)
+  } finally {
+    assetBusy.value = false
+  }
+}
+
+async function runAssetBatch() {
+  assetBusy.value = true
+  assetError.value = ''
+  assetResults.value = []
+  try {
+    const r = await api.evaluate(0, 1, false, '', assetId.value, [...selectedFrames.value])
+    assetResults.value = r.frames.map((f, i) => ({
+      sec: f.fid,
+      buttons: {
+        gt: f.gt_press ? ['…'] : [],
+        pred: f.pred_press ? ['…'] : [],
+        n_correct: parseInt(f.correct_keys || '0'),
+      },
+      j_left: { mse: f.jl_mse },
+      frameIdx: [...selectedFrames.value][i],
+    }))
+  } catch (e) {
+    assetError.value = e.message ?? String(e)
+  } finally {
+    assetBusy.value = false
+  }
+}
+
 function reload() { loadAll() }
 function onResize() {
   chart?.resize()
@@ -430,6 +666,7 @@ watch(segIdx, async () => {
 
 onMounted(() => {
   loadAll()
+  loadAssets()
   window.addEventListener('resize', onResize)
 })
 onBeforeUnmount(() => {
@@ -656,4 +893,25 @@ onBeforeUnmount(() => {
   .charts-col { flex-direction: column; }
   .chart-wrap { min-height: 220px; }
 }
+
+/* ===== 素材评测工作台 ===== */
+.upload-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.upload-btn {
+  display: inline-block; padding: 6px 10px; font-size: 12px; color: var(--text-dim);
+  border: 1px dashed var(--border-strong); border-radius: 4px; cursor: pointer;
+}
+.upload-btn:hover { color: var(--text); border-color: var(--accent); }
+.frame-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px; max-height: 240px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px; background: var(--bg-panel);
+}
+.frame-cell {
+  border: 1px solid var(--border); border-radius: 3px; padding: 3px; cursor: pointer;
+  background: var(--bg); text-align: center; font-size: 10px; color: var(--text-dim);
+}
+.frame-cell img { width: 100%; height: 40px; object-fit: cover; display: block; border-radius: 2px; }
+.frame-cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.asset-results { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.asset-result { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--bg-panel); font-size: 11px; }
 </style>
