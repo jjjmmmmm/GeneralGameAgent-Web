@@ -1,0 +1,42 @@
+/* ===== 设计系统：评测工作台 =====
+   深色操作台风：细边框 + 网格线，克制配色。
+   强调色（青绿）只用于数据层；状态色（绿/红）只用于达标判定。
+   =============================== */
+
+:root {
+  --bg: #0d1117;
+  --bg-panel: #131920;
+  --bg-elev: #1a212b;
+  --border: #2a333f;
+  --border-strong: #3d4a5a;
+  --text: #d7dde4;
+  --text-dim: #8b97a5;
+  --text-faint: #56606d;
+  --accent: #4fd1c5;
+  --accent-dim: rgba(79, 209, 197, 0.12);
+  --ok: #2ecc71;
+  --fail: #ff5d5d;
+  --mono: 'SFMono-Regular', 'Cascadia Code', Consolas, 'Roboto Mono', monospace;
+  --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #app { height: 100%; }
+
+body {
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 数字统一用等宽，避免跳动 */
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
