@@ -15,12 +15,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import inference, metrics_lib
+from . import assets, inference, metrics_lib
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 RESULTS_DIR = DATA_DIR / "results"
@@ -137,12 +137,23 @@ class PredictReq(BaseModel):
     fid: int | None = None          # 视频帧号（优先）
     sec: float | None = None        # 或秒数（可选）
     k: int = 1                      # 推理次数（多数票，flow matching 随机性控制）
+    asset_id: str | None = None     # 素材 id（None=课程默认 SHARD）
 
 
 @app.get("/api/infer/status")
 def infer_status() -> dict:
     """模型加载状态（懒加载 → 前端显示"加载中/就绪"）。"""
     return {"loaded": inference.is_loaded()}
+
+
+def _resolve_asset(asset_id: str | None, sec: float | None) -> tuple[dict | None, float | None]:
+    """asset_id → asset dict；同时从素材拆帧结果查绝对秒。"""
+    if asset_id is None:
+        return None, sec
+    asset = inference.load_asset(asset_id)
+    meta = json.loads((assets.ASSETS_DIR / asset_id / "meta.json").read_text(encoding="utf-8"))
+    asset["sec"] = sec
+    return asset, sec
 
 
 @app.post("/api/predict")
@@ -155,10 +166,11 @@ def predict(req: PredictReq) -> dict:
     else:
         fid = req.fid
 
+    asset, sec = _resolve_asset(req.asset_id, req.sec)
     if not inference.is_loaded():
         inference._load_session()  # 首次加载（约 30s，单请求内阻塞）
     try:
-        result = inference.predict_fid(fid, k=req.k)
+        result = inference.predict_fid(fid, k=req.k, asset=asset)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"推理失败: {e}")
     return result
@@ -169,17 +181,35 @@ class EvaluateReq(BaseModel):
     k: int = 3
     save: bool = False          # True 时结果写入 data/results/ft.json（前端 /api/results 自动多一个版本）
     label: str = "微调后（ft）"  # 保存时的结果集标签
+    asset_id: str | None = None
+    fids: list[int] | None = None   # 素材拆帧的 0 基索引列表（配合 asset_id）
 
 
 @app.post("/api/evaluate")
 def evaluate(req: EvaluateReq) -> dict:
-    """批量评测测试集（n 帧，K 多数票），返回 metrics（可存为 ft 结果）。"""
-    if req.n < 1 or req.n > 3600:
+    """批量评测：默认课程测试集；或素材（asset_id + fids 拆帧索引）→ metrics。"""
+    asset = None
+    if req.asset_id:
+        asset = inference.load_asset(req.asset_id)
+        # 素材帧：由拆帧的索引列表 → (fid=索引, sec=绝对秒)
+        meta = json.loads((assets.ASSETS_DIR / req.asset_id / "meta.json").read_text(encoding="utf-8"))
+        rng = meta.get("range", {})
+        fps = rng.get("fps", 1)
+        start = rng.get("start", 0)
+        fids = req.fids if req.fids else []
+        if not fids:
+            raise HTTPException(status_code=400, detail="素材评测需提供 fids（拆帧索引）")
+        asset["frames"] = [
+            {"fid": idx, "sec": start + idx / fps}
+            for idx in fids
+        ]
+
+    if req.n < 1 or req.n > 3600 and asset is None:
         raise HTTPException(status_code=400, detail="n 需在 1~3600")
     if not inference.is_loaded():
         inference._load_session()
     try:
-        result = inference.run_evaluate(n=req.n, k=req.k)
+        result = inference.run_evaluate(n=req.n, k=req.k, asset=asset)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"评测失败: {e}")
 
@@ -199,3 +229,71 @@ def evaluate(req: EvaluateReq) -> dict:
         result["saved_as"] = "ft.json"
 
     return result
+
+
+# ===== 素材评测工作台（ticket 06：上传视频+标注 → 拆帧 → 选帧对比）=====
+
+class AssetCreateReq(BaseModel):
+    name: str
+
+
+@app.get("/api/assets")
+def list_assets_api() -> dict:
+    return {"assets": assets.list_assets()}
+
+
+@app.post("/api/assets")
+def create_asset_api(req: AssetCreateReq) -> dict:
+    aid = assets.create_asset(req.name or "未命名素材")
+    return {"asset_id": aid}
+
+
+@app.post("/api/assets/{aid}/video")
+async def upload_video(aid: str, file: UploadFile = File(...)) -> dict:
+    ext = "." + (file.filename or "video.mp4").rsplit(".", 1)[-1].lower()
+    data = await file.read()
+    try:
+        assets.save_video(aid, data, ext)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"asset_id": aid, "video": True}
+
+
+@app.post("/api/assets/{aid}/actions")
+async def upload_actions(aid: str, file: UploadFile = File(...)) -> dict:
+    ext = "." + (file.filename or "actions.parquet").rsplit(".", 1)[-1].lower()
+    data = await file.read()
+    try:
+        assets.save_actions(aid, data, ext)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"asset_id": aid, "actions": True}
+
+
+class ExtractReq(BaseModel):
+    start_sec: float
+    end_sec: float
+    fps: int = 1
+
+
+@app.post("/api/assets/{aid}/frames")
+def extract_frames_api(aid: str, req: ExtractReq) -> dict:
+    try:
+        return assets.extract_frames(aid, req.start_sec, req.end_sec, req.fps)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/assets/{aid}/frames/{fname}")
+def frame_image(aid: str, fname: str) -> FileResponse:
+    p = (assets.ASSETS_DIR / aid / "frames" / fname).resolve()
+    frames_dir = (assets.ASSETS_DIR / aid / "frames").resolve()
+    if not p.is_relative_to(frames_dir) or not p.is_file():
+        raise HTTPException(status_code=404, detail=f"未找到帧: {fname}")
+    return FileResponse(p, media_type="image/png")
+
+
+@app.delete("/api/assets/{aid}")
+def delete_asset_api(aid: str) -> dict:
+    assets.delete_asset(aid)
+    return {"deleted": aid}

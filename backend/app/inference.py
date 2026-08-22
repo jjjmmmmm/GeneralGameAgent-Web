@@ -82,13 +82,20 @@ def is_loaded() -> bool:
     return _session is not None
 
 
-def fetch_frame(fid: int) -> np.ndarray:
-    """按帧号从视频抽帧，返回 HxWx3 uint8。"""
-    sec = fid / FPS
-    p = TMP_FRAMES / f"f{fid}.png"
+def fetch_frame(fid: int, asset: dict | None = None) -> np.ndarray:
+    """按帧号从视频抽帧，返回 HxWx3 uint8。
+
+    asset=None → 课程默认视频（全局帧号=秒×60）；
+    asset 提供 → 从素材视频抽帧（asset["sec"] 为绝对秒）。
+    """
+    from . import assets as assets_mod
+
+    sec = asset["sec"] if asset else fid / FPS
+    video = asset["video"] if asset else VIDEO
+    p = TMP_FRAMES / f"f{int(sec * FPS)}.png"
     subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-ss", f"{sec:.3f}",
-         "-i", str(VIDEO), "-frames:v", "1", "-q:v", "2", str(p)],
+         "-i", str(video), "-frames:v", "1", "-q:v", "2", str(p)],
         check=True, capture_output=True,
     )
     img = mpimg.imread(str(p))
@@ -108,26 +115,38 @@ def _chunk_df(cid: str) -> pl.DataFrame:
     return _chunk_cache[cid]
 
 
-def get_gt(fid: int) -> tuple[np.ndarray, np.ndarray]:
-    """按帧号取标注：17 键按钮 + j_left[-1,1]。"""
-    cid = f"{fid // CHUNK_SIZE:04d}"
-    row = fid % CHUNK_SIZE
-    df = _chunk_df(cid)
-    r = df.slice(row, 1)
+def get_gt(fid: int, asset: dict | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """按帧号取标注：17 键按钮 + j_left[-1,1]。
+
+    asset=None → 课程默认 SHARD（帧号=chunk×1200+行号）；
+    asset 提供 → 从素材 parquet 按行读取（行号 = 秒×60 或显式 row）。
+    """
+    if asset is None:
+        cid = f"{fid // CHUNK_SIZE:04d}"
+        row = fid % CHUNK_SIZE
+        df = _chunk_df(cid)
+        r = df.slice(row, 1)
+    else:
+        row = asset.get("row", int(asset["sec"] * FPS))
+        df = asset["df"]
+        n = df.height
+        if row >= n:
+            raise IndexError(f"帧号超标注范围: {row} >= {n}")
+        r = df.slice(row, 1)
     btn17 = np.array([int(r[b].item()) for b in BUTTONS], dtype=int)
     jl = np.array(r["j_left"].to_list()[0], dtype=float)
     return btn17, jl
 
 
-def predict_fid(fid: int, k: int = 1) -> dict:
+def predict_fid(fid: int, k: int = 1, asset: dict | None = None) -> dict:
     """单帧推理：抽帧 → K 次多数票 → 返回 pred/gt 对齐结果。
 
     K=1 时单次；K>=2 时按钮多数票（flow matching 随机性控制）。
     返回 17 键视图（与标注对齐），避免前端处理 21→17 映射。
     """
     session = _load_session()
-    img = fetch_frame(fid)
-    gt_btn17, gt_jl = get_gt(fid)
+    img = fetch_frame(fid, asset)
+    gt_btn17, gt_jl = get_gt(fid, asset)
 
     votes = np.zeros((MODEL_BUTTON_DIM,), dtype=int)
     last_pred = None
@@ -154,7 +173,7 @@ def predict_fid(fid: int, k: int = 1) -> dict:
 
     return {
         "fid": fid,
-        "sec": round(fid / FPS, 2),
+        "sec": round(asset["sec"], 2) if asset else round(fid / FPS, 2),
         "infer_s": round(dt, 3),
         "buttons": {
             "gt": [b for b, v in zip(BUTTONS, gt_btn17) if v],
@@ -169,6 +188,17 @@ def predict_fid(fid: int, k: int = 1) -> dict:
     }
 
 
+def load_asset(aid: str) -> dict:
+    """把素材 id 转成推理可用的 asset dict（video 路径 + parquet df + 秒数映射）。"""
+    from . import assets as assets_mod
+
+    video = assets_mod.get_video_path(aid)
+    if not video.exists():
+        raise FileNotFoundError(f"素材 {aid} 未上传视频")
+    df = assets_mod._load_actions(aid)
+    return {"video": video, "df": df}
+
+
 def pick_test_frames(n: int = 200) -> list[int]:
     """测试集 3600 帧等间隔取 n 帧。"""
     total = len(TEST_CHUNKS) * CHUNK_SIZE
@@ -176,20 +206,31 @@ def pick_test_frames(n: int = 200) -> list[int]:
     return [TEST_START_SEC * FPS + int(i * step) for i in range(n)]
 
 
-def run_evaluate(n: int = 200, k: int = 3, progress_cb=None) -> dict:
-    """批量评测测试集：K 次多数票，输出 metrics（与课程 evaluate.py 口径一致）。"""
+def run_evaluate(n: int = 200, k: int = 3, progress_cb=None, asset: dict | None = None) -> dict:
+    """批量评测：K 次多数票，输出 metrics（与课程 evaluate.py 口径一致）。
+
+    asset=None → 课程测试集（pick_test_frames 抽样）；
+    asset 提供 → 用显式帧列表 fids（asset["fids"]，每项 {fid, sec}）。
+    """
     from . import metrics_lib
 
     session = _load_session()
-    frames = pick_test_frames(n)
+    if asset is not None:
+        frames = [{"fid": f["fid"], "sec": f["sec"]} for f in asset["frames"]]
+    else:
+        frames = [{"fid": fid, "sec": fid / FPS} for fid in pick_test_frames(n)]
     t_start = time.time()
 
     rows = []
     agg = {"n_pred": 0, "n_gt": 0, "n_both": 0, "accs": [], "jl_mse": [], "jl_corr": []}
 
-    for i, fid in enumerate(frames):
-        img = fetch_frame(fid)
-        gt_btn17, gt_jl = get_gt(fid)
+    for i, f in enumerate(frames):
+        fid = f["fid"]
+        asset_i = dict(asset) if asset else None
+        if asset_i is not None:
+            asset_i["sec"] = f["sec"]
+        img = fetch_frame(fid, asset_i)
+        gt_btn17, gt_jl = get_gt(fid, asset_i)
         votes = np.zeros((MODEL_BUTTON_DIM,), dtype=int)
         last_pred = None
         for _ in range(k):
