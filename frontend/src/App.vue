@@ -641,13 +641,19 @@ onBeforeUnmount(() => {
 @media (max-width: 1200px) {
   .body { grid-template-columns: 280px 1fr; }
   .viewer-main { grid-template-columns: 1fr; }
-  .seg-info { flex-direction: row; flex-wrap: wrap; }
-  .seg-thumb { flex: 1; min-width: 200px; }
+  .seg-info { flex-direction: row; flex-wrap: wrap; max-height: 200px; overflow-y: auto; }
+  .seg-thumb { flex: 1; min-width: 220px; max-width: 360px; }
+  /* 窄屏下双图改左右并排，避开垂直堆叠空间不足导致重叠 */
+  .charts-col { flex-direction: row; min-height: 280px; }
+  .chart-wrap { flex: 1; min-width: 0; min-height: 280px; }
 }
 @media (max-width: 800px) {
   .body { grid-template-columns: 1fr; overflow-y: auto; }
   .metrics-panel { border-right: none; border-bottom: 1px solid var(--border); }
   .metric-grid { flex-direction: row; flex-wrap: wrap; }
   .metric { flex: 1; min-width: 140px; }
+  .viewer-main { min-height: 700px; }
+  .charts-col { flex-direction: column; }
+  .chart-wrap { min-height: 220px; }
 }
 </style>
