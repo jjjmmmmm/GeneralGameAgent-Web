@@ -384,6 +384,24 @@
             </div>
           </div>
         </section>
+
+        <!-- 推理曲线（动态：随所选帧/素材变化，坐标固定） -->
+        <section class="infer-card">
+          <div class="panel-head">
+            <h2>推理曲线</h2>
+            <span class="infer-status num" :class="{ on: inferChartData.length }">
+              {{ inferChartData.length ? inferChartData.length + ' 个点' : '暂无数据' }}
+            </span>
+          </div>
+          <div class="infer-body">
+            <div class="infer-hint num">
+              单帧推理 / 素材选帧推理结果可视化 · 横轴时间(秒)，纵轴 j_left 摇杆值(-1~1) · 数据随所选帧/素材变化，坐标固定
+            </div>
+            <div class="chart-wrap">
+              <div ref="inferChartEl" class="chart chart-infer"></div>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -419,9 +437,11 @@ const saveMsg = ref('')
 const chartEl = ref(null)
 const cmpChartEl = ref(null)
 const segChartEl = ref(null)
+const inferChartEl = ref(null)
 let chart = null
 let cmpChart = null
 let segChart = null
+let inferChart = null
 
 // 微调前后对比
 const compareBase = ref(null)
@@ -671,6 +691,77 @@ function renderSegChart() {
   }, true)
 }
 
+// ===== 推理曲线（在线推理页底部，动态） =====
+const inferChartData = computed(() => {
+  const pts = []
+  // 单帧推理结果
+  const pr = predictResult.value
+  if (pr?.j_left?.gt) {
+    pts.push({ sec: pr.sec, gt: pr.j_left.gt[0], pred: pr.j_left.pred[0] })
+  }
+  // 素材选帧推理结果（批量对比无摇杆序列，跳过）
+  for (const r of assetResults.value) {
+    if (r.source !== 'single' || !r.j_left?.gt) continue
+    pts.push({ sec: r.sec, gt: r.j_left.gt[0], pred: r.j_left.pred[0] })
+  }
+  pts.sort((a, b) => a.sec - b.sec)
+  return pts
+})
+
+function renderInferChart() {
+  if (!inferChartEl.value) return
+  if (!inferChart) inferChart = echarts.init(inferChartEl.value)
+  const pts = inferChartData.value
+  if (!pts.length) {
+    inferChart.clear()
+    inferChart.setOption({
+      backgroundColor: 'transparent',
+      title: {
+        text: '推理曲线 · j_left 摇杆',
+        subtext: '先在上方做一次推理，曲线会出现在这里',
+        left: 'center', top: 6, itemGap: 8,
+        textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
+        subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
+      },
+    }, true)
+    return
+  }
+  const x = pts.map(p => p.sec.toFixed(1) + 's')
+  inferChart.setOption({
+    backgroundColor: 'transparent',
+    title: {
+      text: '推理曲线 · j_left 摇杆',
+      subtext: 'gt 人类 vs pred 模型 · 每个点是一次推理的帧 · 数据随所选帧/素材变化',
+      left: 'center', top: 6, itemGap: 8,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
+      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
+    },
+    grid: { left: 56, right: 30, top: 52, bottom: 30 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
+      textStyle: { color: '#d7dde4', fontSize: 12 },
+      valueFormatter: v => v.toFixed(3),
+    },
+    legend: { top: 6, right: 10, textStyle: { color: '#8b97a5' }, data: ['gt', 'pred'] },
+    xAxis: {
+      type: 'category', data: x, name: '时间(秒)', nameLocation: 'middle', nameGap: 26,
+      nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 9 },
+      axisLine: { lineStyle: { color: '#2a333f' } },
+    },
+    yAxis: {
+      type: 'value', name: 'j_left (-1~1)', min: -1, max: 1,
+      nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+    },
+    series: [
+      { name: 'gt', type: 'line', showSymbol: true, symbolSize: 6, lineStyle: { width: 1.6, color: '#e6b45c' }, data: pts.map(p => p.gt) },
+      { name: 'pred', type: 'line', showSymbol: true, symbolSize: 6, lineStyle: { width: 1.4, color: '#4fd1c5' }, data: pts.map(p => p.pred) },
+    ],
+  }, true)
+}
+
 // ===== 在线推理 =====
 async function runPredict() {
   running.value = true
@@ -679,6 +770,7 @@ async function runPredict() {
   try {
     predictResult.value = await api.predict(Number(predictFid.value), 1)
     modelLoaded.value = true
+    renderInferChart()
   } catch (e) {
     predictError.value = e.message ?? String(e)
   } finally {
@@ -870,6 +962,7 @@ async function runAssetPredict() {
       out.push({ ...r, frameIdx: idx, source: 'single' })
     }
     assetResults.value = out
+    renderInferChart()
   } catch (e) {
     assetError.value = e.message ?? String(e)
   } finally {
@@ -909,6 +1002,7 @@ function onResize() {
   chart?.resize()
   cmpChart?.resize()
   segChart?.resize()
+  inferChart?.resize()
 }
 
 watch(segIdx, async () => {
@@ -923,6 +1017,7 @@ watch(view, async () => {
     chart?.resize()
     cmpChart?.resize()
     segChart?.resize()
+    inferChart?.resize()
   }, 60)
 })
 
@@ -930,6 +1025,7 @@ onMounted(() => {
   loadAll()
   loadCompare()
   loadAssets()
+  renderInferChart()
   window.addEventListener('resize', onResize)
 })
 onBeforeUnmount(() => {
@@ -937,6 +1033,7 @@ onBeforeUnmount(() => {
   chart?.dispose()
   cmpChart?.dispose()
   segChart?.dispose()
+  inferChart?.dispose()
 })
 </script>
 
