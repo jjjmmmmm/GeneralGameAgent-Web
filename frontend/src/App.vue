@@ -314,7 +314,7 @@
                 <option :value="30">30fps</option>
                 <option :value="60">60fps(全帧)</option>
               </select>
-              <button class="btn" :disabled="assetBusy" @click="runExtract">拆帧</button>
+              <button class="btn" :disabled="running || assetBusy" @click="runExtract">拆帧</button>
             </div>
             <div v-if="assetActions && currentAssetMeta" class="infer-hint num">
               标注覆盖 {{ currentAssetMeta.actions_rows }} 行 ≈ {{ currentAssetMeta.actions_coverage_sec }}s（60fps 折算）
@@ -337,24 +337,49 @@
 
             <div v-if="assetFrames" class="infer-row batch-row">
               <input v-model="frameSpec" class="select num" placeholder="如 1~20 或 1,3,5" />
-              <button class="btn ghost" :disabled="assetBusy" @click="selectBySpec">按区间选</button>
+              <button class="btn ghost" :disabled="running || assetBusy" @click="selectBySpec">按区间选</button>
             </div>
             <div v-if="assetFrames" class="infer-row">
-              <button class="btn" :disabled="assetBusy || !selectedFrames.size" @click="runAssetPredict">
+              <button class="btn" :disabled="running || assetBusy || !selectedFrames.size" @click="runAssetPredict">
                 推理选中 {{ selectedFrames.size }} 帧
               </button>
-              <button class="btn ghost" :disabled="assetBusy || !selectedFrames.size" @click="runAssetBatch">
+              <button class="btn ghost" :disabled="running || assetBusy || !selectedFrames.size" @click="runAssetBatch">
                 批量对比
               </button>
             </div>
             <div v-if="assetResults.length" class="asset-results">
               <div class="asset-result" v-for="(r, i) in assetResults" :key="i">
-                <div class="infer-line num">
-                  帧 {{ r.sec }}s
-                  <span v-if="r.gt_available === false" class="infer-error">· 标注不覆盖此帧</span>
+                <div class="infer-result">
+                  <div class="infer-result-title num">
+                    ▸ {{ r.source === 'batch' ? '批量对比 · 帧' : '推理结果 · 帧' }} {{ r.sec }}s
+                  </div>
+                  <template v-if="r.gt_available === false">
+                    <div class="infer-error num">标注不覆盖此帧</div>
+                  </template>
+                  <template v-else-if="r.source === 'batch'">
+                    <div class="infer-line num">
+                      gt {{ r.buttons.gt.length ? '按下按键' : '无按键' }}
+                      · pred {{ r.buttons.pred.length ? '按下按键' : '无按键' }}
+                      · 按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
+                    </div>
+                  </template>
                   <template v-else>
-                    · gt[{{ r.buttons.gt.join(',') || '无' }}] pred[{{ r.buttons.pred.join(',') || '无' }}]
-                    · {{ r.buttons.n_correct }}/17 · MSE {{ r.j_left.mse.toFixed(4) }}
+                    <div class="infer-line num">
+                      推理 {{ (r.infer_s ?? 0).toFixed(3) }}s · t={{ r.sec }}s
+                    </div>
+                    <div class="infer-btns">
+                      <span class="infer-label">gt（人类）</span>
+                      <span class="key-chip" v-for="k in r.buttons.gt" :key="'g'+i+k">{{ k }}</span>
+                      <span v-if="!r.buttons.gt.length" class="key-empty num">无</span>
+                    </div>
+                    <div class="infer-btns">
+                      <span class="infer-label">pred（模型）</span>
+                      <span class="key-chip" v-for="k in r.buttons.pred" :key="'p'+i+k">{{ k }}</span>
+                      <span v-if="!r.buttons.pred.length" class="key-empty num">无</span>
+                    </div>
+                    <div class="infer-meta num">
+                      按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
+                    </div>
                   </template>
                 </div>
               </div>
@@ -796,6 +821,7 @@ async function onActionsDir(e) {
 
 async function runExtract() {
   assetBusy.value = true
+  running.value = true
   assetError.value = ''
   selectedFrames.value = new Set()
   assetResults.value = []
@@ -806,6 +832,7 @@ async function runExtract() {
   } catch (e) {
     assetError.value = e.message ?? String(e)
   } finally {
+    running.value = false
     assetBusy.value = false
   }
 }
@@ -830,24 +857,27 @@ function selectBySpec() {
 
 async function runAssetPredict() {
   assetBusy.value = true
+  running.value = true
   assetError.value = ''
   assetResults.value = []
   try {
     const out = []
     for (const idx of [...selectedFrames.value].sort((a, b) => a - b)) {
       const r = await api.predict(idx, 1, assetId.value, null)
-      out.push({ ...r, frameIdx: idx })
+      out.push({ ...r, frameIdx: idx, source: 'single' })
     }
     assetResults.value = out
   } catch (e) {
     assetError.value = e.message ?? String(e)
   } finally {
+    running.value = false
     assetBusy.value = false
   }
 }
 
 async function runAssetBatch() {
   assetBusy.value = true
+  running.value = true
   assetError.value = ''
   assetResults.value = []
   try {
@@ -861,10 +891,12 @@ async function runAssetBatch() {
       },
       j_left: { mse: f.jl_mse },
       frameIdx: [...selectedFrames.value][i],
+      source: 'batch',
     }))
   } catch (e) {
     assetError.value = e.message ?? String(e)
   } finally {
+    running.value = false
     assetBusy.value = false
   }
 }
@@ -1027,7 +1059,7 @@ onBeforeUnmount(() => {
 
 .viewer-main {
   display: grid;
-  grid-template-columns: 460px 1fr;
+  grid-template-columns: minmax(320px, 440px) 1fr;
   gap: 16px;
   padding: 4px 0;
 }
@@ -1046,8 +1078,8 @@ onBeforeUnmount(() => {
 .top5-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
 
 /* 图表：固定高度，防重叠/溢出 */
-.charts-col { display: flex; flex-direction: column; gap: 16px; }
-.chart-wrap { height: 260px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); overflow: hidden; }
+.charts-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.chart-wrap { height: 260px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); overflow: hidden; min-width: 0; }
 .chart { width: 100%; height: 100%; }
 
 /* ===== 演示条 ===== */
@@ -1074,13 +1106,11 @@ onBeforeUnmount(() => {
 /* ===== 在线推理视图 ===== */
 .infer-view { padding: 16px 20px; }
 .infer-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: start;
 }
-.infer-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel); }
-.asset-card { grid-column: 1 / -1; }
+.infer-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel); width: 100%; box-sizing: border-box; }
 .infer-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .infer-row { display: flex; gap: 8px; }
 .infer-row input { flex: 1; min-width: 0; }
@@ -1126,7 +1156,15 @@ onBeforeUnmount(() => {
 .asset-results { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .asset-result { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--bg); font-size: 11px; }
 
-@media (max-width: 1100px) {
+.seg-info { min-width: 0; }
+
+@media (max-width: 1360px) {
   .viewer-main { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .infer-row { flex-wrap: wrap; }
+  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .demo-card.demo-wide { min-width: 220px; max-width: 260px; }
 }
 </style>
