@@ -259,10 +259,12 @@ def run_evaluate(n: int = 200, k: int = 3, progress_cb=None, asset: dict | None 
         agg["jl_mse"].append(jl_mse)
         agg["jl_corr"].append(jl_corr)
         rows.append({
-            "idx": i, "fid": fid,
+            "idx": i, "fid": fid, "sec": f["sec"],
             "pred_press": n_pred, "gt_press": n_gt, "both": n_both,
             "correct_keys": f"{n_correct}/17", "accuracy": round(acc, 4),
             "jl_mse": round(jl_mse, 4), "jl_corr": None if jl_corr != jl_corr else round(jl_corr, 4),
+            "jl_gt": round(float(gt_jl[0]), 4) if gt_jl is not None else None,
+            "jl_pred": round(float(pred_jl[0]), 4),
         })
         if progress_cb and (i + 1) % 20 == 0:
             progress_cb(i + 1, n)

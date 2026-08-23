@@ -395,7 +395,7 @@
           </div>
           <div class="infer-body">
             <div class="infer-hint num">
-              单帧推理 / 素材选帧推理结果可视化 · 横轴时间(秒)，纵轴 j_left 摇杆值(-1~1) · 数据随所选帧/素材变化，坐标固定
+              单帧 / 批量评测 / 素材选帧推理结果可视化 · 横轴时间(秒)，纵轴 j_left 摇杆值(-1~1) · 只显示最近一次推理，坐标固定
             </div>
             <div class="chart-wrap">
               <div ref="inferChartEl" class="chart chart-infer"></div>
@@ -692,20 +692,31 @@ function renderSegChart() {
 }
 
 // ===== 推理曲线（在线推理页底部，动态） =====
+// 曲线只显示"最近一次"推理操作的结果集：single / evaluate / asset
+const lastInfer = ref(null)
 const inferChartData = computed(() => {
-  const pts = []
-  // 单帧推理结果
-  const pr = predictResult.value
-  if (pr?.j_left?.gt) {
-    pts.push({ sec: pr.sec, gt: pr.j_left.gt[0], pred: pr.j_left.pred[0] })
+  // 批量评测（200 帧逐帧摇杆）
+  if (lastInfer.value === 'evaluate' && evaluateResult.value?.frames) {
+    return evaluateResult.value.frames
+      .filter(f => f.jl_gt !== null && f.jl_gt !== undefined)
+      .map(f => ({ sec: f.sec, gt: f.jl_gt, pred: f.jl_pred }))
+      .sort((a, b) => a.sec - b.sec)
   }
-  // 素材选帧推理结果（批量对比无摇杆序列，跳过）
-  for (const r of assetResults.value) {
-    if (r.source !== 'single' || !r.j_left?.gt) continue
-    pts.push({ sec: r.sec, gt: r.j_left.gt[0], pred: r.j_left.pred[0] })
+  // 素材选帧推理
+  if (lastInfer.value === 'asset') {
+    const pts = []
+    for (const r of assetResults.value) {
+      if (r.source !== 'single' || !r.j_left?.gt) continue
+      pts.push({ sec: r.sec, gt: r.j_left.gt[0], pred: r.j_left.pred[0] })
+    }
+    pts.sort((a, b) => a.sec - b.sec)
+    return pts
   }
-  pts.sort((a, b) => a.sec - b.sec)
-  return pts
+  // 单帧推理
+  if (lastInfer.value === 'single' && predictResult.value?.j_left?.gt) {
+    return [{ sec: predictResult.value.sec, gt: predictResult.value.j_left.gt[0], pred: predictResult.value.j_left.pred[0] }]
+  }
+  return []
 })
 
 function renderInferChart() {
@@ -731,7 +742,7 @@ function renderInferChart() {
     backgroundColor: 'transparent',
     title: {
       text: '推理曲线 · j_left 摇杆',
-      subtext: 'gt 人类 vs pred 模型 · 每个点是一次推理的帧 · 数据随所选帧/素材变化',
+      subtext: 'gt 人类 vs pred 模型 · 单帧 / 批量 / 素材推理 · 数据随所选帧/素材变化',
       left: 'center', top: 6, itemGap: 8,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
       subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
@@ -770,6 +781,7 @@ async function runPredict() {
   try {
     predictResult.value = await api.predict(Number(predictFid.value), 1)
     modelLoaded.value = true
+    lastInfer.value = 'single'
     renderInferChart()
   } catch (e) {
     predictError.value = e.message ?? String(e)
@@ -788,6 +800,8 @@ async function runEvaluate() {
     modelLoaded.value = true
     evalDone.value = true
     saveMsg.value = ''
+    lastInfer.value = 'evaluate'
+    renderInferChart()
   } catch (e) {
     evalError.value = e.message ?? String(e)
   } finally {
@@ -962,6 +976,7 @@ async function runAssetPredict() {
       out.push({ ...r, frameIdx: idx, source: 'single' })
     }
     assetResults.value = out
+    lastInfer.value = 'asset'
     renderInferChart()
   } catch (e) {
     assetError.value = e.message ?? String(e)
@@ -989,6 +1004,8 @@ async function runAssetBatch() {
       frameIdx: [...selectedFrames.value][i],
       source: 'batch',
     }))
+    lastInfer.value = 'asset'
+    renderInferChart()
   } catch (e) {
     assetError.value = e.message ?? String(e)
   } finally {
