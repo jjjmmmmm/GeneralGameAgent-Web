@@ -136,6 +136,11 @@
                 </table>
               </div>
             </div>
+            <!-- 该版本无段图时提示 -->
+            <div v-else class="seg-empty">
+              <div class="seg-empty-title num">该版本暂无分段曲线</div>
+              <div class="seg-empty-sub num">段图与演示条仅 baseline 生成 · 切回「baseline · 调优前」可查看</div>
+            </div>
 
             <!-- 右：三图 -->
             <div class="charts-col">
@@ -811,9 +816,17 @@ async function runEvaluate() {
 
 async function saveFt() {
   saveMsg.value = ''
+  if (!evaluateResult.value) {
+    saveMsg.value = '请先运行批量评测'
+    return
+  }
   try {
-    await api.evaluate(200, 3, true, '微调后（ft）')
-    saveMsg.value = '已保存 ft.json → /api/results 现含 ft 版本'
+    // 直接用刚跑完的批量评测结果保存，不再重新评测
+    await api.evaluate(200, 3, true, '微调后（ft）', null, null, evaluateResult.value)
+    if (version.value !== 'ft') version.value = 'ft'
+    await loadAll()
+    await loadCompare()
+    saveMsg.value = '已保存 ft.json 并切换到 ft 版本'
   } catch (e) {
     saveMsg.value = '保存失败: ' + (e.message ?? e)
   }
@@ -1184,6 +1197,13 @@ onBeforeUnmount(() => {
   padding: 4px 0;
 }
 .seg-info { display: flex; flex-direction: column; gap: 10px; }
+.seg-empty {
+  min-height: 120px; border: 1px dashed var(--border-strong); border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  text-align: center; padding: 16px;
+}
+.seg-empty-title { font-size: 12px; color: var(--text-dim); letter-spacing: 1px; }
+.seg-empty-sub { font-size: 11px; color: var(--text-faint); }
 .seg-title { display: flex; align-items: center; gap: 10px; }
 .seg-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 3px;

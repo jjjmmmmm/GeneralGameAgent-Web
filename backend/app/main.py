@@ -204,11 +204,33 @@ class EvaluateReq(BaseModel):
     label: str = "微调后（ft）"  # 保存时的结果集标签
     asset_id: str | None = None
     fids: list[int] | None = None   # 素材拆帧的 0 基索引列表（配合 asset_id）
+    result: dict | None = None  # 提供时 save=True 直接保存该结果（不再重新评测）
 
 
 @app.post("/api/evaluate")
 def evaluate(req: EvaluateReq) -> dict:
-    """批量评测：默认课程测试集；或素材（asset_id + fids 拆帧索引）→ metrics。"""
+    """批量评测：默认课程测试集；或素材（asset_id + fids 拆帧索引）→ metrics。
+
+    save=True 且提供了 result → 直接保存该结果（前端把刚跑完的批量评测结果回传，
+    避免为保存而重跑一遍 200 帧评测）。
+    """
+    if req.save and req.result is not None:
+        frames = req.result.get("frames", [])
+        metrics = req.result.get("metrics", {})
+        ft_path = RESULTS_DIR / "ft.json"
+        ft_path.write_text(json.dumps({
+            "version": "ft",
+            "label": req.label,
+            "source": "在线批量评测（Web /api/evaluate）",
+            "metrics": metrics,
+            "frames": frames,
+            "segments": [],
+            "demo": [],
+            "button_freq": {},
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        _cache.pop("ft", None)  # 使缓存失效，下次读取新文件
+        return {"frames": frames, "metrics": metrics, "saved_as": "ft.json"}
+
     asset = None
     if req.asset_id:
         asset = inference.load_asset(req.asset_id)

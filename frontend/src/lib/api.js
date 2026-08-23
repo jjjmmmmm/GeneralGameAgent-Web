@@ -36,8 +36,8 @@ export const api = {
   inferStatus: () => get('/api/infer/status'),
   predict: (fid, k = 1, assetId = null, sec = null) =>
     post('/api/predict', { fid, k, asset_id: assetId, sec }),
-  evaluate: (n = 200, k = 3, save = false, label = '微调后（ft）', assetId = null, fids = null) =>
-    post('/api/evaluate', { n, k, save, label, asset_id: assetId, fids }),
+  evaluate: (n = 200, k = 3, save = false, label = '微调后（ft）', assetId = null, fids = null, result = null) =>
+    post('/api/evaluate', { n, k, save, label, asset_id: assetId, fids, result }),
   // 素材评测工作台
   assets: () => get('/api/assets').then(d => d.assets),
   createAsset: (name) => post('/api/assets', { name }).then(d => d.asset_id),
