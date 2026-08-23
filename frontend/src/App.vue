@@ -551,11 +551,11 @@ function renderCmpChart() {
   cmpChart.setOption({
     backgroundColor: 'transparent',
     title: {
-      text: '摇杆叠加 · j_left 左摇杆横向值',
-      subtext: 'gt 人类操作 / baseline 调优前 / ft 调优后 · 曲线越贴近 gt 说明模仿越准 · 测试集 640–700s',
-      left: 12, top: 6,
-      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
-      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400 },
+      text: '摇杆叠加 · j_left（左摇杆横向）',
+      subtext: 'gt 人类 / 调优前 / 调优后 · 越贴近 gt 越准 · 测试集 640–700s',
+      left: 12, top: 6, itemGap: 8,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
+      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
     },
     grid: { left: 56, right: 30, top: 56, bottom: 30 },
     tooltip: {
@@ -594,11 +594,11 @@ function renderChart() {
   chart.setOption({
     backgroundColor: 'transparent',
     title: {
-      text: `总览 · ${versionLabel.value}（${version.value}）· 测试集 200 帧逐帧指标`,
-      subtext: '每帧的摇杆误差（j_left MSE，越低越好）与按键准确率（越高越好）',
-      left: 12, top: 6,
-      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
-      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400 },
+      text: `总览 · ${versionLabel.value}（${version.value}）· 200 帧`,
+      subtext: '摇杆误差 MSE 越低越好 · 按键准确率越高越好',
+      left: 12, top: 6, itemGap: 8,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
+      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
     },
     grid: { left: 52, right: 68, top: 56, bottom: 30 },
     tooltip: {
