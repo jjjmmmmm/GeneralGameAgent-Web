@@ -8,7 +8,10 @@
         <span class="sub">rocket_league · SHARD_0088</span>
       </div>
       <div class="topbar-right">
-        <span class="ver-chip" v-if="version">结果集: <b class="num">{{ version }}</b></span>
+        <select v-model="version" class="select ver-select num" @change="onVersionChange" title="切换结果集版本">
+          <option value="baseline">baseline · 零样本</option>
+          <option value="ft">ft · 微调后</option>
+        </select>
         <span class="conn" :class="{ off: !apiOk }">
           <i class="dot"></i>{{ apiOk ? 'API 已连接' : 'API 离线' }}
         </span>
@@ -44,6 +47,42 @@
         <div class="panel-foot num" v-if="metricsData">
           按键事件 · pred {{ metricsData.metrics.events.pred }} / gt {{ metricsData.metrics.events.gt }} / both {{ metricsData.metrics.events.both }}
           <br/>更新于 {{ updatedAt || '—' }}（指标为固定评测结果，重载刷新数据源）
+        </div>
+
+        <!-- 微调前后对比 -->
+        <div class="panel-head infer-head">
+          <h2>微调前后对比</h2>
+          <span class="infer-status num" :class="{ on: compareReady }">
+            {{ compareReady ? 'baseline vs ft' : '加载中…' }}
+          </span>
+        </div>
+        <div class="compare-body" v-if="compareReady">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th class="num">baseline</th>
+                <th class="num">ft</th>
+                <th class="num">差值</th>
+                <th>判定</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in compareRows" :key="row.key">
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.base }}</td>
+                <td class="num">{{ row.ft }}</td>
+                <td class="num" :class="row.deltaClass">{{ row.delta }}</td>
+                <td>
+                  <span v-if="row.pass !== undefined" class="badge" :class="row.pass ? 'b-ok' : 'b-fail'">
+                    {{ row.pass ? '达标' : '未达标' }}
+                  </span>
+                  <span v-else class="badge b-ok">提升</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="compare-note num" v-if="compareNote">{{ compareNote }}</div>
         </div>
 
         <!-- 在线推理 -->
@@ -233,10 +272,13 @@
             </div>
           </div>
 
-          <!-- 右：总曲线 + 分段图 -->
+          <!-- 右：总曲线 + 叠加对比 + 分段图 -->
           <div class="charts-col">
             <div class="chart-wrap">
               <div ref="chartEl" class="chart chart-total"></div>
+            </div>
+            <div class="chart-wrap">
+              <div ref="cmpChartEl" class="chart chart-cmp"></div>
             </div>
             <div class="chart-wrap">
               <div ref="segChartEl" class="chart chart-seg"></div>
@@ -326,9 +368,18 @@ const evalDone = ref(false)
 const saveMsg = ref('')
 
 const chartEl = ref(null)
+const cmpChartEl = ref(null)
 const segChartEl = ref(null)
 let chart = null
+let cmpChart = null
 let segChart = null
+
+// 微调前后对比
+const compareBase = ref(null)
+const compareFt = ref(null)
+const compareFrames = ref([])
+const compareReady = ref(false)
+const compareNote = ref('')
 
 const metricCards = computed(() => {
   if (!metricsData.value) return []
@@ -350,6 +401,43 @@ const metricCards = computed(() => {
 })
 
 const curSeg = computed(() => (segments.value[segIdx.value] ?? null))
+
+const compareRows = computed(() => {
+  if (!compareBase.value || !compareFt.value) return []
+  const b = compareBase.value.metrics
+  const f = compareFt.value.metrics
+  const t = compareFt.value.targets
+  const fmt = (v, kind = 'pct') => {
+    if (v === null || v === undefined) return '—'
+    return kind === 'pct' ? (v * 100).toFixed(1) + '%' : (v >= 0 ? '+' : '') + v.toFixed(3)
+  }
+  const row = (key, label, fb, ff, kind = 'pct', better = 'up') => {
+    const delta = kind === 'pct' ? (ff - fb) * 100 : ff - fb
+    const good = better === 'down' ? delta < 0 : delta > 0
+    return {
+      key, label,
+      base: fmt(fb, kind), ft: fmt(ff, kind),
+      delta: (delta >= 0 ? '+' : '') + delta.toFixed(kind === 'pct' ? 1 : 3),
+      deltaClass: good ? 'd-up' : 'd-down',
+    }
+  }
+  const rows = [
+    row('acc', '按键准确率', b.btn_accuracy, f.btn_accuracy),
+    row('recall', '触发召回率', b.recall, f.recall),
+    row('prec', '触发精确率', b.precision, f.precision),
+    row('f1', 'F1', b.f1, f.f1),
+    row('corr', '摇杆相关', b.jl_corr, f.jl_corr, 'raw', 'up'),
+    row('mse', '摇杆 MSE', b.jl_mse, f.jl_mse, 'raw', 'down'),
+  ]
+  rows.push({
+    key: 'm4', label: 'M4 摇杆达标',
+    base: compareBase.value.verdict.jl_corr_pass ? '✓' : '✗',
+    ft: compareFt.value.verdict.jl_corr_pass ? '✓' : '✗',
+    delta: '—', deltaClass: 'd-na',
+    pass: compareFt.value.verdict.jl_corr_pass,
+  })
+  return rows
+})
 const maxDiff = computed(() => {
   const s = curSeg.value
   return s ? Math.max(...s.top5_diffs) : 0
@@ -377,6 +465,71 @@ async function loadAll() {
     apiOk.value = false
     loadError.value = `无法加载数据：${e.message ?? e}`
   }
+}
+
+async function loadCompare() {
+  try {
+    const [base, ft, frames] = await Promise.all([
+      api.metrics('baseline'), api.metrics('ft'), api.comparison(),
+    ])
+    compareBase.value = base
+    compareFt.value = ft
+    compareFrames.value = frames
+    compareReady.value = true
+    // M4 判定注记
+    compareNote.value = ft.verdict.jl_corr_pass
+      ? 'M4 摇杆达标 ✓'
+      : 'M4 摇杆未达标（如实对比，不修饰）'
+    await nextTick()
+    renderCmpChart()
+  } catch (e) {
+    compareReady.value = false
+    // comparison 未生成时静默（对比卡不显示，主功能不受影响）
+  }
+}
+
+function onVersionChange() {
+  loadAll()
+}
+
+function renderCmpChart() {
+  // 叠加对比 = 摇杆 j_left x 轴逐帧 gt / baseline / ft
+  if (!cmpChartEl.value) return
+  if (!cmpChart) cmpChart = echarts.init(cmpChartEl.value)
+  if (!compareFrames.value.length) return
+  const fr = compareFrames.value
+  const x = fr.map(f => f.fid)
+  cmpChart.setOption({
+    backgroundColor: 'transparent',
+    title: {
+      text: '摇杆叠加 · j_left（gt / baseline / ft）',
+      left: 'center', top: 2,
+      textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
+    },
+    grid: { left: 48, right: 24, top: 36, bottom: 26 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
+      textStyle: { color: '#d7dde4', fontSize: 12 },
+      valueFormatter: v => v.toFixed(3),
+    },
+    legend: { top: 16, textStyle: { color: '#8b97a5' }, data: ['gt', 'baseline', 'ft'] },
+    xAxis: {
+      type: 'category', data: x, name: '帧号',
+      nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 9 },
+      axisLine: { lineStyle: { color: '#2a333f' } },
+    },
+    yAxis: {
+      type: 'value', name: 'j_left', nameTextStyle: { color: '#56606d', fontSize: 10 },
+      axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
+    },
+    series: [
+      { name: 'gt', type: 'line', showSymbol: false, lineStyle: { width: 1.6, color: '#e6b45c' }, data: fr.map(f => f.gt_jl[0]) },
+      { name: 'baseline', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#8b97a5', type: 'dashed' }, data: fr.map(f => f.base_jl[0]) },
+      { name: 'ft', type: 'line', showSymbol: false, lineStyle: { width: 1.4, color: '#4fd1c5' }, data: fr.map(f => f.ft_jl[0]) },
+    ],
+  }, true)
 }
 
 function renderChart() {
@@ -697,6 +850,7 @@ async function runAssetBatch() {
 function reload() { loadAll() }
 function onResize() {
   chart?.resize()
+  cmpChart?.resize()
   segChart?.resize()
 }
 
@@ -707,12 +861,14 @@ watch(segIdx, async () => {
 
 onMounted(() => {
   loadAll()
+  loadCompare()
   loadAssets()
   window.addEventListener('resize', onResize)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
+  cmpChart?.dispose()
   segChart?.dispose()
 })
 </script>
@@ -955,4 +1111,20 @@ onBeforeUnmount(() => {
 .frame-cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .asset-results { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
 .asset-result { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--bg-panel); font-size: 11px; }
+
+/* ===== 微调前后对比 ===== */
+.compare-body { padding: 12px 16px; }
+.compare-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.compare-table th {
+  text-align: left; color: var(--text-faint); font-weight: 500;
+  padding: 4px 6px; border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.compare-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+.compare-table tr:last-child td { border-bottom: none; }
+.d-up { color: var(--ok); }
+.d-down { color: var(--fail); }
+.d-na { color: var(--text-faint); }
+.compare-note { margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+.ver-select { min-width: 150px; }
 </style>

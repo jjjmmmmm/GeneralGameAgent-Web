@@ -31,6 +31,7 @@ export const api = {
     get('/api/frames', { version, limit, offset }).then(d => d.frames),
   buttonFreq: (version = 'baseline') => get('/api/button-freq', { version }),
   demo: (version = 'baseline') => get('/api/demo', { version }).then(d => d.demo),
+  comparison: () => get('/api/comparison').then(d => d.frames),
   // 在线推理
   inferStatus: () => get('/api/infer/status'),
   predict: (fid, k = 1, assetId = null, sec = null) =>
