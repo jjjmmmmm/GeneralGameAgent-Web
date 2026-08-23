@@ -349,39 +349,37 @@
             </div>
             <div v-if="assetResults.length" class="asset-results">
               <div class="asset-result" v-for="(r, i) in assetResults" :key="i">
-                <div class="infer-result">
-                  <div class="infer-result-title num">
-                    ▸ {{ r.source === 'batch' ? '批量对比 · 帧' : '推理结果 · 帧' }} {{ r.sec }}s
-                  </div>
-                  <template v-if="r.gt_available === false">
-                    <div class="infer-error num">标注不覆盖此帧</div>
-                  </template>
-                  <template v-else-if="r.source === 'batch'">
-                    <div class="infer-line num">
-                      gt {{ r.buttons.gt.length ? '按下按键' : '无按键' }}
-                      · pred {{ r.buttons.pred.length ? '按下按键' : '无按键' }}
-                      · 按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
-                    </div>
-                  </template>
-                  <template v-else>
-                    <div class="infer-line num">
-                      推理 {{ (r.infer_s ?? 0).toFixed(3) }}s · t={{ r.sec }}s
-                    </div>
-                    <div class="infer-btns">
-                      <span class="infer-label">gt（人类）</span>
-                      <span class="key-chip" v-for="k in r.buttons.gt" :key="'g'+i+k">{{ k }}</span>
-                      <span v-if="!r.buttons.gt.length" class="key-empty num">无</span>
-                    </div>
-                    <div class="infer-btns">
-                      <span class="infer-label">pred（模型）</span>
-                      <span class="key-chip" v-for="k in r.buttons.pred" :key="'p'+i+k">{{ k }}</span>
-                      <span v-if="!r.buttons.pred.length" class="key-empty num">无</span>
-                    </div>
-                    <div class="infer-meta num">
-                      按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
-                    </div>
-                  </template>
+                <div class="asset-result-head num">
+                  <span class="infer-result-title">▸ {{ r.source === 'batch' ? '批量对比' : '推理结果' }} · 帧 {{ r.sec }}s</span>
+                  <span class="asset-result-meta" v-if="r.gt_available !== false">
+                    推理 {{ (r.infer_s ?? 0).toFixed(3) }}s
+                  </span>
                 </div>
+                <template v-if="r.gt_available === false">
+                  <div class="infer-error num">标注不覆盖此帧</div>
+                </template>
+                <template v-else-if="r.source === 'batch'">
+                  <div class="infer-line num">
+                    gt {{ r.buttons.gt.length ? '按下按键' : '无按键' }}
+                    · pred {{ r.buttons.pred.length ? '按下按键' : '无按键' }}
+                    · 按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="infer-btns">
+                    <span class="infer-label">gt（人类）</span>
+                    <span class="key-chip" v-for="k in r.buttons.gt" :key="'g'+i+k">{{ k }}</span>
+                    <span v-if="!r.buttons.gt.length" class="key-empty num">无</span>
+                  </div>
+                  <div class="infer-btns">
+                    <span class="infer-label">pred（模型）</span>
+                    <span class="key-chip" v-for="k in r.buttons.pred" :key="'p'+i+k">{{ k }}</span>
+                    <span v-if="!r.buttons.pred.length" class="key-empty num">无</span>
+                  </div>
+                  <div class="infer-meta num">
+                    按键 {{ r.buttons.n_correct }}/17 一致 · 摇杆 MSE {{ r.j_left.mse.toFixed(4) }}
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -553,18 +551,20 @@ function renderCmpChart() {
   cmpChart.setOption({
     backgroundColor: 'transparent',
     title: {
-      text: '摇杆叠加 · j_left（gt 人类 / baseline 调优前 / ft 调优后）· 测试集 640–700s',
+      text: '摇杆叠加 · j_left 左摇杆横向值',
+      subtext: 'gt 人类操作 / baseline 调优前 / ft 调优后 · 曲线越贴近 gt 说明模仿越准 · 测试集 640–700s',
       left: 'center', top: 2,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
+      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400 },
     },
-    grid: { left: 48, right: 24, top: 38, bottom: 26 },
+    grid: { left: 56, right: 30, top: 56, bottom: 26 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
       textStyle: { color: '#d7dde4', fontSize: 12 },
       valueFormatter: v => v.toFixed(3),
     },
-    legend: { top: 18, textStyle: { color: '#8b97a5' }, data: ['gt', 'baseline', 'ft'] },
+    legend: { top: 30, textStyle: { color: '#8b97a5' }, data: ['gt', 'baseline', 'ft'] },
     xAxis: {
       type: 'category', data: x, name: '帧号',
       nameTextStyle: { color: '#56606d', fontSize: 10 },
@@ -572,7 +572,8 @@ function renderCmpChart() {
       axisLine: { lineStyle: { color: '#2a333f' } },
     },
     yAxis: {
-      type: 'value', name: 'j_left', nameTextStyle: { color: '#56606d', fontSize: 10 },
+      type: 'value', name: 'j_left (-1~1)', min: -1, max: 1,
+      nameTextStyle: { color: '#56606d', fontSize: 10 },
       axisLabel: { color: '#56606d', fontSize: 10 }, splitLine: { lineStyle: { color: '#1c242e' } },
     },
     series: [
@@ -594,16 +595,18 @@ function renderChart() {
     backgroundColor: 'transparent',
     title: {
       text: `总览 · ${versionLabel.value}（${version.value}）· 测试集 200 帧逐帧指标`,
+      subtext: '每帧的摇杆误差（j_left MSE，越低越好）与按键准确率（越高越好）',
       left: 'center', top: 2,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400 },
+      subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400 },
     },
-    grid: { left: 52, right: 68, top: 38, bottom: 26 },
+    grid: { left: 52, right: 68, top: 56, bottom: 26 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(19,25,32,0.95)', borderColor: '#3d4a5a',
       textStyle: { color: '#d7dde4', fontSize: 12 },
     },
-    legend: { top: 18, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
+    legend: { top: 34, textStyle: { color: '#8b97a5' }, data: ['j_left MSE', '按键准确率'] },
     xAxis: {
       type: 'category', data: x, name: '帧号',
       nameTextStyle: { color: '#56606d', fontSize: 10 },
@@ -950,6 +953,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 0 20px;
   height: 52px;
   border-bottom: 1px solid var(--border);
@@ -958,7 +963,7 @@ onBeforeUnmount(() => {
   top: 0;
   z-index: 10;
 }
-.topbar-left { display: flex; align-items: baseline; gap: 12px; }
+.topbar-left { display: flex; align-items: baseline; gap: 12px; flex-shrink: 0; }
 .mark {
   font-family: var(--mono);
   font-weight: 700;
@@ -971,16 +976,17 @@ onBeforeUnmount(() => {
 }
 .title { font-size: 15px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--text-faint); font-family: var(--mono); }
-.topbar-center { display: flex; }
+.topbar-center { display: flex; flex-shrink: 0; }
 .nav { display: flex; gap: 4px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 3px; }
 .nav-btn {
   background: none; border: none; color: var(--text-dim);
   padding: 5px 18px; font-size: 13px; cursor: pointer; border-radius: 4px;
   font-family: var(--sans);
+  white-space: nowrap;
 }
 .nav-btn:hover { color: var(--text); }
 .nav-btn.on { background: var(--accent); color: #06231f; font-weight: 600; }
-.topbar-right { display: flex; align-items: center; gap: 14px; }
+.topbar-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 .conn { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 .conn.off { color: var(--fail); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
@@ -1153,8 +1159,18 @@ onBeforeUnmount(() => {
 .frame-cell { border: 1px solid var(--border); border-radius: 3px; padding: 3px; cursor: pointer; background: var(--bg-elev); text-align: center; font-size: 10px; color: var(--text-dim); }
 .frame-cell img { width: 100%; height: 40px; object-fit: cover; display: block; border-radius: 2px; }
 .frame-cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.asset-results { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
-.asset-result { border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--bg); font-size: 11px; }
+.asset-results {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); max-height: 260px; overflow-y: auto;
+}
+.asset-result {
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+}
+.asset-result:last-child { border-bottom: none; }
+.asset-result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.asset-result-meta { font-size: 10px; color: var(--text-faint); }
 
 .seg-info { min-width: 0; }
 
@@ -1163,6 +1179,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 900px) {
+  .topbar { height: auto; padding: 8px 16px; }
+  .sub { display: none; }
   .infer-row { flex-wrap: wrap; }
   .metric-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
   .demo-card.demo-wide { min-width: 220px; max-width: 260px; }
