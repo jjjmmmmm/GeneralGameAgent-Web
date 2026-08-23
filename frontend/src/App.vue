@@ -553,7 +553,7 @@ function renderCmpChart() {
     title: {
       text: '摇杆叠加 · j_left（左摇杆横向）',
       subtext: 'gt 人类 / 调优前 / 调优后 · 越贴近 gt 越准 · 测试集 640–700s',
-      left: 12, top: 6, itemGap: 8,
+      left: 'center', top: 6, itemGap: 8,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
       subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
     },
@@ -596,7 +596,7 @@ function renderChart() {
     title: {
       text: `总览 · ${versionLabel.value}（${version.value}）· 200 帧`,
       subtext: '摇杆误差 MSE 越低越好 · 按键准确率越高越好',
-      left: 12, top: 6, itemGap: 8,
+      left: 'center', top: 6, itemGap: 8,
       textStyle: { color: '#8b97a5', fontSize: 11, fontWeight: 400, lineHeight: 16 },
       subtextStyle: { color: '#56606d', fontSize: 10, fontWeight: 400, lineHeight: 14 },
     },
