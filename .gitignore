@@ -23,6 +23,8 @@ train/_*.log
 !backend/data/
 !backend/data/results/
 !backend/data/results/*.json
+backend/data/assets/
+backend/data/figures/
 
 # 日志
 *.log
