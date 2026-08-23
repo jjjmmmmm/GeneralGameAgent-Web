@@ -50,6 +50,8 @@ def _load(version: str) -> dict:
 def _list_versions() -> list[dict]:
     out = []
     for p in sorted(RESULTS_DIR.glob("*.json")):
+        if p.stem == "comparison":
+            continue  # comparison 是逐帧对比数据（v2 曲线用），不是结果集版本
         data = json.loads(p.read_text(encoding="utf-8"))
         out.append({
             "version": data.get("version", p.stem),
@@ -103,6 +105,15 @@ def get_frames(version: str = "baseline", limit: int = 200, offset: int = 0) -> 
 def get_button_freq(version: str = "baseline") -> dict:
     data = _load(version)
     return {"version": version, "button_freq": data.get("button_freq", {})}
+
+
+@app.get("/api/comparison")
+def get_comparison() -> dict:
+    """微调前后逐帧对比（gt / baseline / ft 摇杆 + 按键），前端 v2 曲线叠加用。"""
+    p = RESULTS_DIR / "comparison.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="对比数据不存在（先跑 train/export_comparison.py）")
+    return json.loads(p.read_text(encoding="utf-8"))
 
 
 @app.get("/api/demo")
