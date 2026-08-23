@@ -209,6 +209,15 @@
 
     <!-- ========== 视图 2：在线推理 ========== -->
     <main v-show="view === 'infer'" class="infer-view">
+      <!-- 推理模型选择（baseline 调优前 / ft 调优后） -->
+      <div class="infer-model-bar">
+        <span class="infer-model-label">推理模型</span>
+        <select v-model="inferModel" class="select num" title="选择推理模型">
+          <option value="ft">调优后（LoRA ft · 准确率更高）</option>
+          <option value="baseline">调优前（零样本 baseline）</option>
+        </select>
+        <span class="infer-hint num">切换模型后首次推理会重新加载（约 30s）</span>
+      </div>
       <div class="infer-grid">
         <!-- 单帧推理 -->
         <section class="infer-card">
@@ -430,6 +439,7 @@ const segIdx = ref(0)
 
 // 在线推理状态
 const modelLoaded = ref(false)
+const inferModel = ref('ft')  // baseline（调优前 ng.pt）| ft（调优后 ft_lora.pt）；默认调优后
 const running = ref(false)
 const predictFid = ref(38400)
 const predictResult = ref(null)
@@ -784,7 +794,7 @@ async function runPredict() {
   predictError.value = ''
   predictResult.value = null
   try {
-    predictResult.value = await api.predict(Number(predictFid.value), 1)
+    predictResult.value = await api.predict(Number(predictFid.value), 1, null, null, inferModel.value)
     modelLoaded.value = true
     lastInfer.value = 'single'
     renderInferChart()
@@ -801,7 +811,7 @@ async function runEvaluate() {
   evaluateResult.value = null
   evalDone.value = false
   try {
-    evaluateResult.value = await api.evaluate(200, 3, false)
+    evaluateResult.value = await api.evaluate(200, 3, false, '', null, null, null, inferModel.value)
     modelLoaded.value = true
     evalDone.value = true
     saveMsg.value = ''
@@ -985,7 +995,7 @@ async function runAssetPredict() {
   try {
     const out = []
     for (const idx of [...selectedFrames.value].sort((a, b) => a - b)) {
-      const r = await api.predict(idx, 1, assetId.value, null)
+      const r = await api.predict(idx, 1, assetId.value, null, inferModel.value)
       out.push({ ...r, frameIdx: idx, source: 'single' })
     }
     assetResults.value = out
@@ -1038,6 +1048,17 @@ function onResize() {
 watch(segIdx, async () => {
   await nextTick()
   renderSegChart()
+})
+
+// 切换推理模型：清空旧结果，提示重新加载
+watch(inferModel, () => {
+  modelLoaded.value = false
+  predictResult.value = null
+  evaluateResult.value = null
+  evalDone.value = false
+  saveMsg.value = ''
+  lastInfer.value = null
+  renderInferChart()
 })
 
 watch(view, async () => {
@@ -1245,6 +1266,12 @@ onBeforeUnmount(() => {
 
 /* ===== 在线推理视图 ===== */
 .infer-view { padding: 16px 20px; }
+.infer-model-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel);
+}
+.infer-model-label { font-size: 12px; color: var(--text-dim); letter-spacing: 1px; }
 .infer-grid {
   display: flex;
   flex-direction: column;

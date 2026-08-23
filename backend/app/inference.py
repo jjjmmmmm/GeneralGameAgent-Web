@@ -26,6 +26,11 @@ import sys
 if str(_NITROGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_NITROGEN_DIR))
 
+# 离线环境：强制 transformers 走本地 HF 缓存（siglip2 processor 已在缓存中），
+# 避免每次加载都尝试联网下载 processor_config.json 而卡死
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 from nitrogen.inference_session import InferenceSession  # noqa: E402
 
 # ---- 数据布局常量（D5/T1 查证，硬编码保证自包含）----
@@ -57,30 +62,47 @@ TEST_CHUNKS = ["0032", "0033", "0034"]
 TEST_START_SEC = 640
 TEST_DURATION_SEC = 60
 
-# ---- 懒加载单例 ----
+# ---- 懒加载单例（支持 baseline / ft 两套模型，切换时释放旧模型省显存）----
 _session = None
+_session_model = None
 _session_lock = threading.Lock()
 _chunk_cache: dict[str, pl.DataFrame] = {}
 
 TMP_FRAMES = Path(__file__).resolve().parent.parent / "data" / "_tmp_frames"
+MODEL_FT = Path(__file__).resolve().parent.parent.parent / "train" / "ckpt" / "ft_lora.pt"
 
 
-def _load_session():
-    """懒加载（线程安全）。首次约 30s，需显式提示。"""
-    global _session
-    if _session is not None:
+def _load_session(model: str = "baseline"):
+    """懒加载（线程安全）。model ∈ baseline | ft。首次约 30s，需显式提示。"""
+    global _session, _session_model
+    key = "ft" if model == "ft" else "baseline"
+    if _session is not None and _session_model == key:
         return _session
     with _session_lock:
-        if _session is None:
-            TMP_FRAMES.mkdir(parents=True, exist_ok=True)
-            _session = InferenceSession.from_ckpt(
-                str(CKPT), old_layout=False, cfg_scale=1.0, context_length=1
-            )
+        if _session is not None and _session_model == key:
+            return _session
+        ckpt = MODEL_FT if key == "ft" else CKPT
+        if not ckpt.exists():
+            raise RuntimeError(f"模型文件不存在: {ckpt}")
+        if _session is not None:
+            del _session  # 8G 显存不足以同时驻留两个模型，切换时释放旧的
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        TMP_FRAMES.mkdir(parents=True, exist_ok=True)
+        _session = InferenceSession.from_ckpt(
+            str(ckpt), old_layout=False, cfg_scale=1.0, context_length=1
+        )
+        _session_model = key
     return _session
 
 
 def is_loaded() -> bool:
     return _session is not None
+
+
+def loaded_model() -> str | None:
+    """当前驻留的模型：'baseline' | 'ft' | None。"""
+    return _session_model
 
 
 def fetch_frame(fid: int, asset: dict | None = None) -> np.ndarray:
@@ -145,13 +167,14 @@ def get_gt(fid: int, asset: dict | None = None) -> tuple[np.ndarray | None, np.n
     return btn17, jl
 
 
-def predict_fid(fid: int, k: int = 1, asset: dict | None = None) -> dict:
+def predict_fid(fid: int, k: int = 1, asset: dict | None = None, model: str = "baseline") -> dict:
     """单帧推理：抽帧 → K 次多数票 → 返回 pred/gt 对齐结果。
 
     K=1 时单次；K>=2 时按钮多数票（flow matching 随机性控制）。
     返回 17 键视图（与标注对齐），避免前端处理 21→17 映射。
+    model ∈ baseline | ft（调优前 ng.pt / 调优后 ft_lora.pt）。
     """
-    session = _load_session()
+    session = _load_session(model)
     img = fetch_frame(fid, asset)
     gt_btn17, gt_jl = get_gt(fid, asset)
 
@@ -215,15 +238,16 @@ def pick_test_frames(n: int = 200) -> list[int]:
     return [TEST_START_SEC * FPS + int(i * step) for i in range(n)]
 
 
-def run_evaluate(n: int = 200, k: int = 3, progress_cb=None, asset: dict | None = None) -> dict:
+def run_evaluate(n: int = 200, k: int = 3, progress_cb=None, asset: dict | None = None, model: str = "baseline") -> dict:
     """批量评测：K 次多数票，输出 metrics（与课程 evaluate.py 口径一致）。
 
     asset=None → 课程测试集（pick_test_frames 抽样）；
     asset 提供 → 用显式帧列表 fids（asset["fids"]，每项 {fid, sec}）。
+    model ∈ baseline | ft。
     """
     from . import metrics_lib
 
-    session = _load_session()
+    session = _load_session(model)
     if asset is not None:
         frames = [{"fid": f["fid"], "sec": f["sec"]} for f in asset["frames"]]
     else:

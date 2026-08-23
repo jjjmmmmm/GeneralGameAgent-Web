@@ -149,12 +149,16 @@ class PredictReq(BaseModel):
     sec: float | None = None        # 或秒数（可选）
     k: int = 1                      # 推理次数（多数票，flow matching 随机性控制）
     asset_id: str | None = None     # 素材 id（None=课程默认 SHARD）
+    model: str = "baseline"         # baseline（调优前 ng.pt）| ft（调优后 ft_lora.pt）
 
 
 @app.get("/api/infer/status")
 def infer_status() -> dict:
     """模型加载状态（懒加载 → 前端显示"加载中/就绪"）。"""
-    return {"loaded": inference.is_loaded()}
+    return {
+        "loaded": inference.is_loaded(),
+        "model": inference.loaded_model(),
+    }
 
 
 def _resolve_asset(asset_id: str | None, fid: int | None) -> tuple[dict | None, int | None]:
@@ -188,10 +192,8 @@ def predict(req: PredictReq) -> dict:
         fid = req.fid if req.fid is not None else int(round((req.sec or 0) * inference.FPS))
         sec = req.sec
 
-    if not inference.is_loaded():
-        inference._load_session()  # 首次加载（约 30s，单请求内阻塞）
     try:
-        result = inference.predict_fid(fid, k=req.k, asset=asset)
+        result = inference.predict_fid(fid, k=req.k, asset=asset, model=req.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"推理失败: {e}")
     return result
@@ -205,6 +207,7 @@ class EvaluateReq(BaseModel):
     asset_id: str | None = None
     fids: list[int] | None = None   # 素材拆帧的 0 基索引列表（配合 asset_id）
     result: dict | None = None  # 提供时 save=True 直接保存该结果（不再重新评测）
+    model: str = "baseline"     # baseline（调优前 ng.pt）| ft（调优后 ft_lora.pt）
 
 
 @app.post("/api/evaluate")
@@ -249,10 +252,8 @@ def evaluate(req: EvaluateReq) -> dict:
 
     if asset is None and (req.n < 1 or req.n > 3600):
         raise HTTPException(status_code=400, detail="n 需在 1~3600")
-    if not inference.is_loaded():
-        inference._load_session()
     try:
-        result = inference.run_evaluate(n=req.n, k=req.k, asset=asset)
+        result = inference.run_evaluate(n=req.n, k=req.k, asset=asset, model=req.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"评测失败: {e}")
 
