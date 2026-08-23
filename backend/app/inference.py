@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -92,14 +93,21 @@ def fetch_frame(fid: int, asset: dict | None = None) -> np.ndarray:
 
     sec = asset["sec"] if asset else fid / FPS
     video = asset["video"] if asset else VIDEO
-    p = TMP_FRAMES / f"f{int(sec * FPS)}.png"
-    subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-ss", f"{sec:.3f}",
-         "-i", str(video), "-frames:v", "1", "-q:v", "2", str(p)],
-        check=True, capture_output=True,
-    )
-    img = mpimg.imread(str(p))
-    p.unlink()
+    TMP_FRAMES.mkdir(parents=True, exist_ok=True)
+    # 唯一文件名：避免并发推理抽同一秒时互相覆盖/删除
+    p = TMP_FRAMES / f"f{int(sec * FPS)}_{os.getpid()}_{threading.get_ident()}_{time.time_ns()}.png"
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-ss", f"{sec:.3f}",
+             "-i", str(video), "-frames:v", "1", "-q:v", "2", str(p)],
+            check=True, capture_output=True,
+        )
+        img = mpimg.imread(str(p))
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"抽帧失败 sec={sec:.3f}: {e.stderr.decode(errors='replace')[:200]}") from e
+    finally:
+        if p.exists():
+            p.unlink()
     if img.dtype != np.uint8:
         img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
     if img.shape[-1] == 4:
