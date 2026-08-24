@@ -239,6 +239,9 @@ function splitTitleChars() {
     for (const ch of text) {
       const s = document.createElement('span')
       s.className = 'title-char'
+      // 动态创建的元素没有 scoped data 属性，scoped CSS 不生效，
+      // 必须内联 inline-block，否则 inline 元素的 transform 不生效（扭曲失效的根因）
+      s.style.display = 'inline-block'
       s.textContent = ch === ' ' ? '\u00A0' : ch
       el.appendChild(s)
     }
