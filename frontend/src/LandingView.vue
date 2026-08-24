@@ -11,7 +11,7 @@
     <section class="landing-hero">
       <p class="landing-eyebrow num">ROCKET LEAGUE · DOMAIN ADAPTATION</p>
 
-      <!-- 大标题：Three.js + GLSL 顶点涟漪（WebGL 不可用时回退到 HTML 标题） -->
+      <!-- 大标题：优先 Three.js + GLSL 顶点涟漪；WebGL2 不可用时自动降级 2D 像素涟漪 -->
       <div class="landing-title">
         <div class="title-three" ref="titleThreeWrap" aria-hidden="true"></div>
         <h1 class="title-fallback" aria-label="TEACHING AGENTS TO PLAY">
@@ -98,9 +98,8 @@ import { onMounted, onBeforeUnmount, ref } from 'vue'
 import * as THREE from 'three'
 
 // Web Tactics 风格门面页。
-// 大标题 = Three.js 文字平面 + GLSL 顶点 shader：鼠标靠近时以鼠标为中心产生弹性涟漪扰动，
-// 越近越强、远离平滑恢复（sin 波 * 半径衰减 * 时间流动）。
-// 其余：循环打字机、滚动揭示、数字滚动、字幕条、自定义光标。
+// 大标题涟漪：优先 Three.js + GLSL 顶点 shader（鼠标为圆心、半径内流体扰动）；
+// WebGL2 不可用时自动降级 2D 像素涟漪（逐像素偏移采样，效果等价，任何浏览器可见）。
 
 const cursorDot = ref(null)
 const cursorRing = ref(null)
@@ -124,7 +123,6 @@ function cursorLoop() {
   if (!cursorRing.value) return
   ringX += (mouseX - ringX) * 0.16
   ringY += (mouseY - ringY) * 0.16
-  // 小点（鼠标）始终不越过圆环：限制圆环中心到鼠标距离 ≤ RING_R
   let dx = mouseX - ringX, dy = mouseY - ringY
   const dist = Math.hypot(dx, dy)
   if (dist > RING_R) {
@@ -204,15 +202,31 @@ function countUp(el) {
   requestAnimationFrame(tick)
 }
 
-// ================= Three.js 标题：GLSL 顶点涟漪 =================
-let threeCtx = null
-
+// ================= 标题涟漪入口 =================
 function showFallback() {
   document.querySelector('.title-fallback')?.classList.add('show')
   titleThreeWrap.value?.remove()
 }
 
-// 用系统字体把标题画到离屏 canvas，作为文字平面纹理（保留原生字体轮廓，支持中文）
+// WebGL2 可用 → three；否则 → 2D 像素涟漪
+function setupTitleEffect() {
+  const wrap = titleThreeWrap.value
+  if (!wrap) { showFallback(); return }
+  let webgl2 = false
+  try { webgl2 = !!document.createElement('canvas').getContext('webgl2') } catch { /* ignore */ }
+  if (webgl2) setupThreeTitle()
+  else setupRipple2D()
+}
+
+// three 失败 → 自动降级 2D
+function fallbackTo2D() {
+  cleanupThreeTitle()
+  setupRipple2D()
+}
+
+// ================= Three.js 文字平面 + GLSL 顶点涟漪 =================
+let threeCtx = null
+
 function makeTextTexture(text) {
   const font = '800 110px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
   const c = document.createElement('canvas')
@@ -236,28 +250,15 @@ function makeTextTexture(text) {
 function setupThreeTitle() {
   const wrap = titleThreeWrap.value
   const titleEl = document.querySelector('.landing-title')
-  if (!wrap || !titleEl) { showFallback(); return }
-
-  // 防御：任何 Three/WebGL 初始化异常都回退 HTML 标题，且不阻断后续初始化
-  try {
-    const t = document.createElement('canvas')
-    if (!(t.getContext('webgl') || t.getContext('webgl2') || t.getContext('experimental-webgl'))) {
-      throw new Error('WebGL 不可用')
-    }
-  } catch (err) {
-    console.warn('[landing] three title disabled:', err)
-    showFallback()
-    return
-  }
+  if (!wrap || !titleEl) { fallbackTo2D(); return }
 
   let renderer
   try {
     renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
-    // shader 编译失败（不抛 JS 异常）也回退 HTML 标题，避免空白
-    renderer.debug.onShaderError = () => showFallback()
+    renderer.debug.onShaderError = () => fallbackTo2D()
   } catch (err) {
-    console.warn('[landing] three renderer failed:', err)
-    showFallback()
+    console.warn('[landing] three renderer failed, downgrade to 2d:', err)
+    fallbackTo2D()
     return
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -267,19 +268,17 @@ function setupThreeTitle() {
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50)
   camera.position.z = 8
 
-  // 文字平面：宽 1 单位，高按纹理宽高比（局部坐标 x ∈ [-0.5, 0.5]）
   const tex = makeTextTexture('TEACHING AGENTS\nTO PLAY')
   const aspect = tex.image.width / tex.image.height
   const geo = new THREE.PlaneGeometry(1, 1 / aspect, 180, 48)
 
-  // GLSL：顶点按到鼠标的距离做弹性涟漪（z 凸起），半径内越近越强，正弦波随时间流动
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     uniforms: {
       u_map: { value: tex },
-      u_mouse: { value: new THREE.Vector2(99, 99) }, // 鼠标在文字平面局部坐标
-      u_radius: { value: 0.5 },                      // 扰动半径（局部单位，平面宽 1）
+      u_mouse: { value: new THREE.Vector2(99, 99) },
+      u_radius: { value: 0.5 },
       u_time: { value: 0 },
     },
     vertexShader: `
@@ -292,12 +291,10 @@ function setupThreeTitle() {
         v_uv = uv;
         vec3 pos = position;
         float d = distance(pos.xy, u_mouse);
-        // 半径内衰减：越近越强（falloff^2 更柔和）
         float falloff = 1.0 - smoothstep(0.0, u_radius, d);
-        // 空间涟漪：沿距离的正弦波 + 时间流动，形成流体弹性
         float wave = sin(d * 9.0 - u_time * 3.0) * 0.5 + 0.5;
         float mag = falloff * falloff * wave;
-        pos.z += mag * 0.3;                  // 向屏幕外柔和鼓起（幅度增强）
+        pos.z += mag * 0.3;
         v_glow = falloff * (0.4 + wave * 0.6);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }
@@ -308,10 +305,9 @@ function setupThreeTitle() {
       varying float v_glow;
       void main() {
         vec4 t = texture2D(u_map, v_uv);
-        if (t.a < 0.4) discard;              // 透明区裁掉，保留字体轮廓
-        // 淡紫霓虹：近鼠标处辉光 + 字形边缘紫边
+        if (t.a < 0.4) discard;
         float edge = 1.0 - smoothstep(0.35, 0.85, t.a);
-        vec3 neon = vec3(0.66, 0.55, 0.98);  // #a78bfa
+        vec3 neon = vec3(0.66, 0.55, 0.98);
         vec3 col = t.rgb * 0.92 + neon * (v_glow * 0.55 + edge * 0.25);
         gl_FragColor = vec4(col, t.a);
       }
@@ -321,7 +317,6 @@ function setupThreeTitle() {
   const mesh = new THREE.Mesh(geo, mat)
   scene.add(mesh)
 
-  // 尺寸适配：让文字宽度占容器可视宽度的 ~86%
   function resize() {
     const rect = titleEl.getBoundingClientRect()
     if (rect.width < 10 || rect.height < 10) return
@@ -329,15 +324,13 @@ function setupThreeTitle() {
     camera.aspect = rect.width / rect.height
     const viewH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z
     const viewW = viewH * camera.aspect
-    const s = Math.max(viewW * 0.86, 0.1)
-    mesh.scale.setScalar(s)
+    mesh.scale.setScalar(Math.max(viewW * 0.86, 0.1))
     camera.updateProjectionMatrix()
   }
   resize()
   const ro = new ResizeObserver(resize)
   ro.observe(titleEl)
 
-  // 鼠标：NDC → 世界（z=0 平面）→ 文字局部坐标（除以 mesh 缩放）
   const raycaster = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
   const zPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
@@ -357,33 +350,156 @@ function setupThreeTitle() {
   wrap.addEventListener('pointermove', onMove)
   wrap.addEventListener('pointerleave', onLeave)
 
-  // 动画循环：鼠标 lerp 平滑（弹性拖尾）、时间推进、渲染
   const clock = new THREE.Clock()
   function animate() {
     threeCtx.raf = requestAnimationFrame(animate)
-    cur.lerp(target, 0.09)
+    cur.lerp(target, 0.12)
     mat.uniforms.u_mouse.value.copy(cur)
     mat.uniforms.u_time.value = clock.getElapsedTime()
     renderer.render(scene, camera)
   }
   animate()
 
-  threeCtx = {
-    renderer, scene, camera, mesh, mat, geo, tex, raf: null, ro,
-    listeners: [wrap, onMove, onLeave],
-  }
+  threeCtx = { renderer, scene, camera, mesh, mat, geo, tex, raf: null, ro, onMove, onLeave }
 }
 
 function cleanupThreeTitle() {
   if (!threeCtx) return
   cancelAnimationFrame(threeCtx.raf)
   threeCtx.ro?.disconnect()
+  threeCtx.wrap.removeEventListener('pointermove', threeCtx.onMove)
+  threeCtx.wrap.removeEventListener('pointerleave', threeCtx.onLeave)
   threeCtx.renderer.dispose()
   threeCtx.geo.dispose()
   threeCtx.mat.dispose()
   threeCtx.tex.dispose()
   threeCtx.renderer.domElement.remove()
   threeCtx = null
+}
+
+// ================= 2D 像素涟漪（WebGL 不可用时的等价降级） =================
+let ripple2d = null
+
+function setupRipple2D() {
+  const wrap = titleThreeWrap.value
+  const titleEl = document.querySelector('.landing-title')
+  if (!wrap || !titleEl) { showFallback(); return }
+
+  try {
+    // 离屏源：高分辨率白字 + 紫色霓虹光晕
+    const font = '800 110px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
+    const src = document.createElement('canvas')
+    const sctx = src.getContext('2d')
+    const lines = ['TEACHING AGENTS', 'TO PLAY']
+    const lineH = 134
+    const pad = 26
+    sctx.font = font
+    src.width = Math.ceil(Math.max(...lines.map(l => sctx.measureText(l).width)) + pad * 2)
+    src.height = Math.ceil(lines.length * lineH + pad)
+    sctx.font = font
+    sctx.textAlign = 'center'
+    sctx.textBaseline = 'middle'
+    sctx.shadowColor = 'rgba(124, 58, 237, 0.6)'
+    sctx.shadowBlur = 26
+    sctx.fillStyle = '#f4f4f6'
+    lines.forEach((l, i) => sctx.fillText(l, src.width / 2, pad + (i + 0.5) * lineH))
+    const srcData = sctx.getImageData(0, 0, src.width, src.height)
+
+    // 可见 canvas：0.5 降采样保证每帧流畅
+    const cv = document.createElement('canvas')
+    wrap.appendChild(cv)
+    const ctx = cv.getContext('2d')
+
+    const R = 150         // 扰动半径（css px）
+    const STRENGTH = 16   // 最大偏移（目标像素）
+    const FREQ = 0.05
+    const SPEED = 3.0
+
+    let target = { x: -999, y: -999 }
+    let mouse = { x: -999, y: -999 }
+    let t = 0
+    let last = performance.now()
+
+    function resize() {
+      const rect = titleEl.getBoundingClientRect()
+      if (rect.width < 10 || rect.height < 10) return
+      cv.width = Math.round(rect.width * 0.5)
+      cv.height = Math.round(rect.height * 0.5)
+      cv.style.width = rect.width + 'px'
+      cv.style.height = rect.height + 'px'
+    }
+    resize()
+    const ro = new ResizeObserver(resize)
+    ro.observe(titleEl)
+
+    const onMove = e => {
+      const r = wrap.getBoundingClientRect()
+      target.x = e.clientX - r.left
+      target.y = e.clientY - r.top
+    }
+    const onLeave = () => { target.x = -999; target.y = -999 }
+    wrap.addEventListener('pointermove', onMove)
+    wrap.addEventListener('pointerleave', onLeave)
+
+    function frame() {
+      ripple2d.raf = requestAnimationFrame(frame)
+      const now = performance.now()
+      t += Math.min((now - last) / 1000, 0.05)
+      last = now
+      mouse.x += (target.x - mouse.x) * 0.1
+      mouse.y += (target.y - mouse.y) * 0.1
+
+      const W = cv.width, H = cv.height
+      if (W < 4 || H < 4) return
+      const iw = srcData.width, ih = srcData.height
+      const s0 = srcData.data
+      const dst = ctx.createImageData(W, H)
+      const d0 = dst.data
+      const mx = mouse.x * (W / cv.clientWidth)
+      const my = mouse.y * (H / cv.clientHeight)
+      const sx = iw / W, sy = ih / H
+
+      for (let y = 0; y < H; y++) {
+        const rowBase = y * W
+        for (let x = 0; x < W; x++) {
+          const dx = x - mx, dy = y - my
+          const d = Math.sqrt(dx * dx + dy * dy)
+          let u = x * sx, v = y * sy
+          if (d < R && d > 0.001) {
+            const fall = 1 - d / R
+            const off = Math.sin(d * FREQ - t * SPEED) * fall * fall * STRENGTH
+            const inv = 1 / d
+            u += dx * inv * off * sx
+            v += dy * inv * off * sy
+          }
+          const si = (Math.floor(v) * iw + Math.floor(u)) * 4
+          if (si < 0 || si + 3 >= s0.length) continue
+          const di = (rowBase + x) * 4
+          d0[di] = s0[si]
+          d0[di + 1] = s0[si + 1]
+          d0[di + 2] = s0[si + 2]
+          d0[di + 3] = s0[si + 3]
+        }
+      }
+      ctx.putImageData(dst, 0, 0)
+    }
+    frame()
+
+    ripple2d = { wrap, cv, ro, raf: null, onMove, onLeave }
+  } catch (err) {
+    console.warn('[landing] 2d ripple failed:', err)
+    showFallback()
+  }
+}
+
+function cleanupRipple2D() {
+  if (!ripple2d) return
+  cancelAnimationFrame(ripple2d.raf)
+  ripple2d.ro.disconnect()
+  ripple2d.wrap.removeEventListener('pointermove', ripple2d.onMove)
+  ripple2d.wrap.removeEventListener('pointerleave', ripple2d.onLeave)
+  ripple2d.cv.remove()
+  ripple2d = null
 }
 
 // ================= 生命周期 =================
@@ -394,8 +510,7 @@ onMounted(() => {
   const typed = document.querySelector('.landing-typed .typed-text')
   if (typed) typeLoop(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
 
-  // 标题与光标解耦：Three 失败只回退标题，绝不阻断光标/滚动/计数
-  try { setupThreeTitle() } catch (err) { console.warn('[landing] three title failed:', err); showFallback() }
+  try { setupTitleEffect() } catch (err) { console.warn('[landing] title effect failed:', err); fallbackTo2D() }
   setupCursor()
 
   const io = new IntersectionObserver(entries => {
@@ -422,6 +537,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   cleanupCursor()
   cleanupThreeTitle()
+  cleanupRipple2D()
 })
 </script>
 
@@ -441,7 +557,7 @@ onBeforeUnmount(() => {
   background: var(--lp-bg);
   color: var(--lp-text);
   overflow-x: hidden;
-  cursor: none;             /* 隐藏系统光标，使用自定义光标 */
+  cursor: none;
 }
 
 .landing-bg {
@@ -456,7 +572,6 @@ onBeforeUnmount(() => {
   background-size: 100% 100%, 52px 52px, 52px 52px;
 }
 
-/* 顶栏 */
 .landing-top {
   position: relative;
   z-index: 1;
@@ -470,7 +585,6 @@ onBeforeUnmount(() => {
 .landing-logo-slash { color: var(--lp-accent); }
 .landing-tag { font-size: 11px; letter-spacing: 0.24em; color: var(--lp-muted); }
 
-/* Hero */
 .landing-hero {
   position: relative;
   z-index: 1;
@@ -497,7 +611,6 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: none; }
 }
 
-/* 标题容器：Three.js canvas 绝对覆盖，h1 作为 WebGL 不可用时的回退 */
 .landing-title {
   position: relative;
   width: min(100%, 960px);
@@ -513,7 +626,7 @@ onBeforeUnmount(() => {
 .title-three canvas { display: block; width: 100% !important; height: 100% !important; }
 .title-fallback {
   position: relative;
-  pointer-events: none;   /* 透明回退标题不拦截鼠标事件，否则 canvas 收不到 pointermove，涟漪不触发 */
+  pointer-events: none;
   opacity: 0;
   font-size: clamp(2.6rem, 8vw, 5.6rem);
   font-weight: 800;
@@ -577,7 +690,6 @@ onBeforeUnmount(() => {
 .landing-btn:active { transform: scale(0.98); }
 .landing-hint { font-size: 11px; letter-spacing: 0.18em; color: var(--lp-muted); }
 
-/* 滚动字幕条 */
 .landing-marquee {
   position: relative;
   z-index: 1;
@@ -608,7 +720,6 @@ onBeforeUnmount(() => {
   margin: 0 18px 2px;
 }
 
-/* 指标区 */
 .landing-stats {
   position: relative;
   z-index: 1;
@@ -626,7 +737,6 @@ onBeforeUnmount(() => {
 .stat-weak { color: #7d738f; }
 .stat-label { margin-top: 10px; font-size: 12px; color: var(--lp-muted); letter-spacing: 0.04em; }
 
-/* 功能索引 */
 .landing-index {
   position: relative;
   z-index: 1;
@@ -651,7 +761,6 @@ onBeforeUnmount(() => {
 .index-name { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .index-desc { margin-top: 6px; font-size: 12px; color: var(--lp-muted); }
 
-/* 页脚 */
 .landing-foot {
   position: relative;
   z-index: 1;
@@ -668,7 +777,6 @@ onBeforeUnmount(() => {
   color: var(--lp-muted);
 }
 
-/* 滚动揭示 */
 .reveal {
   opacity: 0;
   transform: translateY(26px);
