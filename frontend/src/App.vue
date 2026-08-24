@@ -665,7 +665,7 @@ function renderChart() {
     ],
     series: [
       { name: 'j_left MSE', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#a78bfa' }, data: jl, yAxisIndex: 0 },
-      { name: '按键准确率', type: 'line', showSymbol: false, lineStyle: { width: 1.2, color: '#c9b8ff' }, data: acc, yAxisIndex: 1 },
+      { name: '按键准确率', type: 'line', showSymbol: false, lineStyle: { width: 1.4, color: '#f2effa' }, data: acc, yAxisIndex: 1 },
     ],
   }, true)
 }
