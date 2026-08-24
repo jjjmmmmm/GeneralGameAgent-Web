@@ -4,14 +4,14 @@
    =============================== */
 
 :root {
-  --bg: #0d1117;
-  --bg-panel: #131920;
-  --bg-elev: #1a212b;
-  --border: #2a333f;
-  --border-strong: #3d4a5a;
-  --text: #d7dde4;
-  --text-dim: #8b97a5;
-  --text-faint: #56606d;
+  --bg: #0c0a12;            /* 黑紫底（去蓝） */
+  --bg-panel: #14101f;
+  --bg-elev: #1e1930;
+  --border: #2e2940;
+  --border-strong: #453d5e;
+  --text: #ded8ee;          /* 淡紫白 */
+  --text-dim: #a79fc4;      /* 灰紫 */
+  --text-faint: #6f6987;    /* 暗紫灰 */
   --accent: #a78bfa;
   --accent-dim: rgba(167, 139, 250, 0.12);
   --ok: #2ecc71;
