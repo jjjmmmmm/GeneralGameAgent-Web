@@ -11,13 +11,10 @@
     <section class="landing-hero">
       <p class="landing-eyebrow num">ROCKET LEAGUE · DOMAIN ADAPTATION</p>
 
-      <!-- 大标题：优先 Three.js + GLSL 顶点涟漪；WebGL2 不可用时自动降级 2D 像素涟漪 -->
-      <div class="landing-title">
-        <div class="title-three" ref="titleThreeWrap" aria-hidden="true"></div>
-        <h1 class="title-fallback" aria-label="TEACHING AGENTS TO PLAY">
-          TEACHING<br />AGENTS <em>TO PLAY</em>
-        </h1>
-      </div>
+      <!-- 大标题：纯 HTML 立体渲染（稳定，无 WebGL 依赖） -->
+      <h1 class="landing-title" aria-label="TEACHING AGENTS TO PLAY">
+        TEACHING<br />AGENTS <em>TO PLAY</em>
+      </h1>
 
       <div class="landing-typed num">
         <span class="typed-text"></span><span class="typed-cursor">|</span>
@@ -95,15 +92,12 @@
 
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import * as THREE from 'three'
 
 // Web Tactics 风格门面页。
-// 大标题涟漪：优先 Three.js + GLSL 顶点 shader（鼠标为圆心、半径内流体扰动）；
-// WebGL2 不可用时自动降级 2D 像素涟漪（逐像素偏移采样，效果等价，任何浏览器可见）。
+// 标题为纯 HTML 立体渲染（稳定无依赖）；保留循环打字机、滚动揭示、数字滚动、字幕条、自定义光标。
 
 const cursorDot = ref(null)
 const cursorRing = ref(null)
-const titleThreeWrap = ref(null)
 
 // ================= 自定义光标 =================
 const RING_R = 18
@@ -202,306 +196,6 @@ function countUp(el) {
   requestAnimationFrame(tick)
 }
 
-// ================= 标题涟漪入口 =================
-function showFallback() {
-  document.querySelector('.title-fallback')?.classList.add('show')
-  titleThreeWrap.value?.remove()
-}
-
-// WebGL2 可用 → three；否则 → 2D 像素涟漪
-function setupTitleEffect() {
-  const wrap = titleThreeWrap.value
-  if (!wrap) { showFallback(); return }
-  let webgl2 = false
-  try { webgl2 = !!document.createElement('canvas').getContext('webgl2') } catch { /* ignore */ }
-  if (webgl2) setupThreeTitle()
-  else setupRipple2D()
-}
-
-// three 失败 → 自动降级 2D
-function fallbackTo2D() {
-  cleanupThreeTitle()
-  setupRipple2D()
-}
-
-// ================= Three.js 文字平面 + GLSL 顶点涟漪 =================
-let threeCtx = null
-
-function makeTextTexture(text) {
-  const font = '800 110px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
-  const c = document.createElement('canvas')
-  const ctx = c.getContext('2d')
-  ctx.font = font
-  const lines = text.split('\n')
-  const lineH = 134
-  const pad = 26
-  c.width = Math.ceil(Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2)
-  c.height = Math.ceil(lines.length * lineH + pad)
-  ctx.font = font
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#f4f4f6'
-  lines.forEach((l, i) => ctx.fillText(l, c.width / 2, pad + (i + 0.5) * lineH))
-  const tex = new THREE.CanvasTexture(c)
-  tex.minFilter = THREE.LinearFilter
-  return tex
-}
-
-function setupThreeTitle() {
-  const wrap = titleThreeWrap.value
-  const titleEl = document.querySelector('.landing-title')
-  if (!wrap || !titleEl) { fallbackTo2D(); return }
-
-  let renderer
-  try {
-    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
-    renderer.debug.onShaderError = () => fallbackTo2D()
-  } catch (err) {
-    console.warn('[landing] three renderer failed, downgrade to 2d:', err)
-    fallbackTo2D()
-    return
-  }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  wrap.appendChild(renderer.domElement)
-
-  const scene = new THREE.Scene()
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50)
-  camera.position.z = 8
-
-  const tex = makeTextTexture('TEACHING AGENTS\nTO PLAY')
-  const aspect = tex.image.width / tex.image.height
-  const geo = new THREE.PlaneGeometry(1, 1 / aspect, 180, 48)
-
-  const mat = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    uniforms: {
-      u_map: { value: tex },
-      u_mouse: { value: new THREE.Vector2(99, 99) },
-      u_radius: { value: 0.5 },
-      u_time: { value: 0 },
-    },
-    vertexShader: `
-      uniform vec2 u_mouse;
-      uniform float u_radius;
-      uniform float u_time;
-      varying vec2 v_uv;
-      varying float v_glow;
-      void main() {
-        v_uv = uv;
-        vec3 pos = position;
-        float d = distance(pos.xy, u_mouse);
-        float falloff = 1.0 - smoothstep(0.0, u_radius, d);
-        float wave = sin(d * 9.0 - u_time * 3.0) * 0.5 + 0.5;
-        float mag = falloff * falloff * wave;
-        pos.z += mag * 0.3;
-        v_glow = falloff * (0.4 + wave * 0.6);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D u_map;
-      varying vec2 v_uv;
-      varying float v_glow;
-      void main() {
-        vec4 t = texture2D(u_map, v_uv);
-        if (t.a < 0.4) discard;
-        float edge = 1.0 - smoothstep(0.35, 0.85, t.a);
-        vec3 neon = vec3(0.66, 0.55, 0.98);
-        vec3 col = t.rgb * 0.92 + neon * (v_glow * 0.55 + edge * 0.25);
-        gl_FragColor = vec4(col, t.a);
-      }
-    `,
-  })
-
-  const mesh = new THREE.Mesh(geo, mat)
-  scene.add(mesh)
-
-  function resize() {
-    const rect = titleEl.getBoundingClientRect()
-    if (rect.width < 10 || rect.height < 10) return
-    renderer.setSize(rect.width, rect.height)
-    camera.aspect = rect.width / rect.height
-    const viewH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z
-    const viewW = viewH * camera.aspect
-    mesh.scale.setScalar(Math.max(viewW * 0.86, 0.1))
-    camera.updateProjectionMatrix()
-  }
-  resize()
-  const ro = new ResizeObserver(resize)
-  ro.observe(titleEl)
-
-  const raycaster = new THREE.Raycaster()
-  const ndc = new THREE.Vector2()
-  const zPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
-  const target = new THREE.Vector2(99, 99)
-  const cur = target.clone()
-  const onMove = e => {
-    const rect = wrap.getBoundingClientRect()
-    ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
-    raycaster.setFromCamera(ndc, camera)
-    const pt = new THREE.Vector3()
-    if (raycaster.ray.intersectPlane(zPlane, pt)) {
-      const s = mesh.scale.x || 1
-      target.set(pt.x / s, pt.y / s)
-    }
-  }
-  const onLeave = () => target.set(99, 99)
-  wrap.addEventListener('pointermove', onMove)
-  wrap.addEventListener('pointerleave', onLeave)
-
-  const clock = new THREE.Clock()
-  function animate() {
-    threeCtx.raf = requestAnimationFrame(animate)
-    cur.lerp(target, 0.12)
-    mat.uniforms.u_mouse.value.copy(cur)
-    mat.uniforms.u_time.value = clock.getElapsedTime()
-    renderer.render(scene, camera)
-  }
-  animate()
-
-  threeCtx = { renderer, scene, camera, mesh, mat, geo, tex, raf: null, ro, onMove, onLeave }
-}
-
-function cleanupThreeTitle() {
-  if (!threeCtx) return
-  cancelAnimationFrame(threeCtx.raf)
-  threeCtx.ro?.disconnect()
-  threeCtx.wrap.removeEventListener('pointermove', threeCtx.onMove)
-  threeCtx.wrap.removeEventListener('pointerleave', threeCtx.onLeave)
-  threeCtx.renderer.dispose()
-  threeCtx.geo.dispose()
-  threeCtx.mat.dispose()
-  threeCtx.tex.dispose()
-  threeCtx.renderer.domElement.remove()
-  threeCtx = null
-}
-
-// ================= 2D 像素涟漪（WebGL 不可用时的等价降级） =================
-let ripple2d = null
-
-function setupRipple2D() {
-  const wrap = titleThreeWrap.value
-  const titleEl = document.querySelector('.landing-title')
-  if (!wrap || !titleEl) { showFallback(); return }
-
-  try {
-    // 离屏源：高分辨率白字 + 紫色霓虹光晕
-    const font = '800 110px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
-    const src = document.createElement('canvas')
-    const sctx = src.getContext('2d')
-    const lines = ['TEACHING AGENTS', 'TO PLAY']
-    const lineH = 134
-    const pad = 26
-    sctx.font = font
-    src.width = Math.ceil(Math.max(...lines.map(l => sctx.measureText(l).width)) + pad * 2)
-    src.height = Math.ceil(lines.length * lineH + pad)
-    sctx.font = font
-    sctx.textAlign = 'center'
-    sctx.textBaseline = 'middle'
-    sctx.shadowColor = 'rgba(124, 58, 237, 0.6)'
-    sctx.shadowBlur = 26
-    sctx.fillStyle = '#f4f4f6'
-    lines.forEach((l, i) => sctx.fillText(l, src.width / 2, pad + (i + 0.5) * lineH))
-    const srcData = sctx.getImageData(0, 0, src.width, src.height)
-
-    // 可见 canvas：0.5 降采样保证每帧流畅
-    const cv = document.createElement('canvas')
-    wrap.appendChild(cv)
-    const ctx = cv.getContext('2d')
-
-    const R = 150         // 扰动半径（css px）
-    const STRENGTH = 16   // 最大偏移（目标像素）
-    const FREQ = 0.05
-    const SPEED = 3.0
-
-    let target = { x: -999, y: -999 }
-    let mouse = { x: -999, y: -999 }
-    let t = 0
-    let last = performance.now()
-
-    function resize() {
-      const rect = titleEl.getBoundingClientRect()
-      if (rect.width < 10 || rect.height < 10) return
-      cv.width = Math.round(rect.width * 0.5)
-      cv.height = Math.round(rect.height * 0.5)
-      cv.style.width = rect.width + 'px'
-      cv.style.height = rect.height + 'px'
-    }
-    resize()
-    const ro = new ResizeObserver(resize)
-    ro.observe(titleEl)
-
-    const onMove = e => {
-      const r = wrap.getBoundingClientRect()
-      target.x = e.clientX - r.left
-      target.y = e.clientY - r.top
-    }
-    const onLeave = () => { target.x = -999; target.y = -999 }
-    wrap.addEventListener('pointermove', onMove)
-    wrap.addEventListener('pointerleave', onLeave)
-
-    function frame() {
-      ripple2d.raf = requestAnimationFrame(frame)
-      const now = performance.now()
-      t += Math.min((now - last) / 1000, 0.05)
-      last = now
-      mouse.x += (target.x - mouse.x) * 0.1
-      mouse.y += (target.y - mouse.y) * 0.1
-
-      const W = cv.width, H = cv.height
-      if (W < 4 || H < 4) return
-      const iw = srcData.width, ih = srcData.height
-      const s0 = srcData.data
-      const dst = ctx.createImageData(W, H)
-      const d0 = dst.data
-      const mx = mouse.x * (W / cv.clientWidth)
-      const my = mouse.y * (H / cv.clientHeight)
-      const sx = iw / W, sy = ih / H
-
-      for (let y = 0; y < H; y++) {
-        const rowBase = y * W
-        for (let x = 0; x < W; x++) {
-          const dx = x - mx, dy = y - my
-          const d = Math.sqrt(dx * dx + dy * dy)
-          let u = x * sx, v = y * sy
-          if (d < R && d > 0.001) {
-            const fall = 1 - d / R
-            const off = Math.sin(d * FREQ - t * SPEED) * fall * fall * STRENGTH
-            const inv = 1 / d
-            u += dx * inv * off * sx
-            v += dy * inv * off * sy
-          }
-          const si = (Math.floor(v) * iw + Math.floor(u)) * 4
-          if (si < 0 || si + 3 >= s0.length) continue
-          const di = (rowBase + x) * 4
-          d0[di] = s0[si]
-          d0[di + 1] = s0[si + 1]
-          d0[di + 2] = s0[si + 2]
-          d0[di + 3] = s0[si + 3]
-        }
-      }
-      ctx.putImageData(dst, 0, 0)
-    }
-    frame()
-
-    ripple2d = { wrap, cv, ro, raf: null, onMove, onLeave }
-  } catch (err) {
-    console.warn('[landing] 2d ripple failed:', err)
-    showFallback()
-  }
-}
-
-function cleanupRipple2D() {
-  if (!ripple2d) return
-  cancelAnimationFrame(ripple2d.raf)
-  ripple2d.ro.disconnect()
-  ripple2d.wrap.removeEventListener('pointermove', ripple2d.onMove)
-  ripple2d.wrap.removeEventListener('pointerleave', ripple2d.onLeave)
-  ripple2d.cv.remove()
-  ripple2d = null
-}
-
 // ================= 生命周期 =================
 onMounted(() => {
   const eyebrow = document.querySelector('.landing-eyebrow')
@@ -510,7 +204,6 @@ onMounted(() => {
   const typed = document.querySelector('.landing-typed .typed-text')
   if (typed) typeLoop(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
 
-  try { setupTitleEffect() } catch (err) { console.warn('[landing] title effect failed:', err); fallbackTo2D() }
   setupCursor()
 
   const io = new IntersectionObserver(entries => {
@@ -536,8 +229,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cleanupCursor()
-  cleanupThreeTitle()
-  cleanupRipple2D()
 })
 </script>
 
@@ -592,14 +283,14 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 7vh 24px 5vh;
+  padding: 8vh 24px 5vh;
 }
 .landing-eyebrow {
   font-size: 11px;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--lp-accent);
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 .eyebrow-char {
   display: inline-block;
@@ -611,35 +302,33 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: none; }
 }
 
+/* 大标题：纯 HTML 立体渲染 */
 .landing-title {
-  position: relative;
-  width: min(100%, 960px);
-  min-height: clamp(5.4rem, 16vw, 11.2rem);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.title-three {
-  position: absolute;
-  inset: 0;
-}
-.title-three canvas { display: block; width: 100% !important; height: 100% !important; }
-.title-fallback {
-  position: relative;
-  pointer-events: none;
-  opacity: 0;
   font-size: clamp(2.6rem, 8vw, 5.6rem);
   font-weight: 800;
   line-height: 0.98;
   letter-spacing: 0.01em;
   text-transform: uppercase;
   color: var(--lp-text);
+  /* 立体感：浮雕亮边 + 黑色刻痕 + 深投影 + 紫色环境光 */
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.09),
+    0 2px 0 rgba(0, 0, 0, 0.55),
+    0 4px 0 rgba(0, 0, 0, 0.35),
+    0 10px 18px rgba(0, 0, 0, 0.55),
+    0 18px 42px rgba(124, 58, 237, 0.28);
 }
-.title-fallback em { font-style: italic; color: var(--lp-accent); }
-.title-fallback.show { opacity: 1; }
+.landing-title em {
+  font-style: italic;
+  color: var(--lp-accent);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 3px 8px rgba(0, 0, 0, 0.6),
+    0 0 30px rgba(167, 139, 250, 0.5);
+}
 
 .landing-typed {
-  margin-top: 16px;
+  margin-top: 18px;
   font-size: clamp(0.95rem, 2.2vw, 1.35rem);
   font-weight: 600;
   letter-spacing: 0.28em;
@@ -655,14 +344,14 @@ onBeforeUnmount(() => {
 @keyframes blink { 50% { opacity: 0; } }
 
 .landing-sub {
-  margin-top: 20px;
+  margin-top: 22px;
   max-width: 46ch;
   font-size: 15px;
   line-height: 1.8;
   color: var(--lp-muted);
 }
 .landing-cta {
-  margin-top: 34px;
+  margin-top: 36px;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -813,7 +502,7 @@ onBeforeUnmount(() => {
 /* 响应式 */
 @media (max-width: 900px) {
   .landing-top { padding: 16px 20px; }
-  .landing-hero { padding-top: 6vh; }
+  .landing-hero { padding-top: 7vh; }
   .landing-stats { grid-template-columns: repeat(2, 1fr); margin: 0 20px; }
   .landing-index { grid-template-columns: 1fr; margin: 0 20px; }
   .landing-foot { padding: 16px 20px; }
