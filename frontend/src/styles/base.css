@@ -14,8 +14,8 @@
   --text-faint: #6f6987;    /* 暗紫灰 */
   --accent: #a78bfa;
   --accent-dim: rgba(167, 139, 250, 0.12);
-  --ok: #2ecc71;
-  --fail: #ff5d5d;
+  --ok: #c4a8ff;            /* 达标：浅紫（去绿） */
+  --fail: #7a6a96;          /* 未达标：暗紫灰（去红） */
   --mono: 'SFMono-Regular', 'Cascadia Code', Consolas, 'Roboto Mono', monospace;
   --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
