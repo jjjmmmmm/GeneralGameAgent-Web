@@ -1,5 +1,8 @@
 <template>
   <div class="workspace">
+    <!-- 门面首页：点击 CTA 后进入工作台 -->
+    <LandingView v-if="view === 'landing'" @enter="view = 'viewer'" />
+    <template v-else>
     <!-- 顶栏 -->
     <header class="topbar">
       <div class="topbar-left">
@@ -418,6 +421,7 @@
         </section>
       </div>
     </main>
+    </template>
   </div>
 </template>
 
@@ -425,8 +429,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { api } from './lib/api'
+import LandingView from './LandingView.vue'
 
-const view = ref('viewer')
+const view = ref('landing')  // landing 门面首页 → viewer 工作台
 const version = ref('baseline')
 const metricsData = ref(null)
 const segments = ref([])
@@ -1063,8 +1068,15 @@ watch(inferModel, () => {
 
 watch(view, async () => {
   await nextTick()
-  // 切回查看器时确保图表尺寸正确
+  // landing → 工作台时图表容器是新建的，需重新 init 渲染；常规切换只需 resize
   setTimeout(() => {
+    if (view.value === 'viewer') {
+      renderChart()
+      renderCmpChart()
+      renderSegChart()
+    } else if (view.value === 'infer') {
+      renderInferChart()
+    }
     chart?.resize()
     cmpChart?.resize()
     segChart?.resize()
