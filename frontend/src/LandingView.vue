@@ -10,11 +10,15 @@
 
     <section class="landing-hero">
       <p class="landing-eyebrow num">ROCKET LEAGUE · DOMAIN ADAPTATION</p>
-      <h1 class="landing-title">
-        <span class="decode" data-text="TEACHING">TEACHING</span><br />
-        <span class="decode" data-text="AGENTS">AGENTS</span>
-        <em class="decode" data-text="TO PLAY">TO PLAY</em>
-      </h1>
+
+      <!-- 大标题：Three.js + GLSL 顶点涟漪（WebGL 不可用时回退到 HTML 标题） -->
+      <div class="landing-title">
+        <div class="title-three" ref="titleThreeWrap" aria-hidden="true"></div>
+        <h1 class="title-fallback" aria-label="TEACHING AGENTS TO PLAY">
+          TEACHING<br />AGENTS <em>TO PLAY</em>
+        </h1>
+      </div>
+
       <div class="landing-typed num">
         <span class="typed-text"></span><span class="typed-cursor">|</span>
       </div>
@@ -91,99 +95,25 @@
 
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from 'vue'
+import * as THREE from 'three'
 
-// Web Tactics 风格动效：标题解码、循环打字机、滚动揭示、数字滚动、字幕条、
-// 自定义光标（圆环滞后）、标题立体扭曲。
-// 全部在 onMounted 执行（Vue 渲染完成），元素通过类名选择，不依赖响应式数据。
+// Web Tactics 风格门面页。
+// 大标题 = Three.js 文字平面 + GLSL 顶点 shader：鼠标靠近时以鼠标为中心产生弹性涟漪扰动，
+// 越近越强、远离平滑恢复（sin 波 * 半径衰减 * 时间流动）。
+// 其余：循环打字机、滚动揭示、数字滚动、字幕条、自定义光标。
 
 const cursorDot = ref(null)
 const cursorRing = ref(null)
-const DECODE_CHARS = '!<>-_\\/[]{}_=+*^?#&%$@'
+const titleThreeWrap = ref(null)
 
-function decodeText(el) {
-  const target = el.dataset.text
-  let frame = 0
-  const total = 34
-  const tick = () => {
-    const reveal = Math.floor((frame / total) * target.length)
-    let out = ''
-    for (let i = 0; i < target.length; i++) {
-      const c = target[i]
-      if (c === ' ') { out += ' '; continue }
-      out += i < reveal ? c : DECODE_CHARS[Math.floor(Math.random() * DECODE_CHARS.length)]
-    }
-    el.textContent = out
-    frame++
-    if (frame <= total) requestAnimationFrame(tick)
-    else el.textContent = target
-  }
-  tick()
-}
-
-// 循环打字机：打出 → 停住 → 删回 → 停顿 → 再打出
-function typeLoop(el, text, speed = 46, hold = 1800, eraseSpeed = 24) {
-  let i = 0
-  let deleting = false
-  const tick = () => {
-    el.textContent = text.slice(0, i)
-    if (!deleting) {
-      i++
-      if (i > text.length) {
-        deleting = true
-        setTimeout(tick, hold)      // 打完整句后停留
-        return
-      }
-      setTimeout(tick, speed)
-    } else {
-      i--
-      if (i < 0) {
-        deleting = false
-        setTimeout(tick, 600)      // 删光后短暂停顿再重打
-        return
-      }
-      setTimeout(tick, eraseSpeed)
-    }
-  }
-  setTimeout(tick, 700)
-}
-
-function countUp(el) {
-  const target = parseFloat(el.dataset.target)
-  const decimals = parseInt(el.dataset.decimals || '0', 10)
-  const dur = 1500
-  const t0 = performance.now()
-  const tick = now => {
-    const p = Math.min((now - t0) / dur, 1)
-    const eased = 1 - Math.pow(1 - p, 3)
-    el.textContent = (eased * target).toFixed(decimals)
-    if (p < 1) requestAnimationFrame(tick)
-    else el.textContent = target.toFixed(decimals)
-  }
-  requestAnimationFrame(tick)
-}
-
-function splitEyebrow(el) {
-  const text = el.textContent
-  el.textContent = ''
-  for (let i = 0; i < text.length; i++) {
-    const s = document.createElement('span')
-    s.className = 'eyebrow-char'
-    s.textContent = text[i] === ' ' ? '\u00A0' : text[i]
-    s.style.animationDelay = `${0.12 + i * 0.03}s`
-    el.appendChild(s)
-  }
-}
-
-// ---- 自定义光标：小点跟手，圆环 lerp 滞后；小点始终不越过圆环 ----
-const RING_R = 18  // 圆环半径（小点到圆环中心的最大距离）
+// ================= 自定义光标 =================
+const RING_R = 18
 let mouseX = -200, mouseY = -200
 let ringX = -200, ringY = -200
 let cursorRaf = null
-let reduceMotion = false
 
 function onMouseMove(e) {
-  mouseX = e.clientX
-  mouseY = e.clientY
+  mouseX = e.clientX; mouseY = e.clientY
   if (cursorDot.value) {
     cursorDot.value.style.left = mouseX + 'px'
     cursorDot.value.style.top = mouseY + 'px'
@@ -194,9 +124,8 @@ function cursorLoop() {
   if (!cursorRing.value) return
   ringX += (mouseX - ringX) * 0.16
   ringY += (mouseY - ringY) * 0.16
-  // 限制圆环中心与鼠标（小点）距离 ≤ RING_R：小点永远在圆环内
-  let dx = mouseX - ringX
-  let dy = mouseY - ringY
+  // 小点（鼠标）始终不越过圆环：限制圆环中心到鼠标距离 ≤ RING_R
+  let dx = mouseX - ringX, dy = mouseY - ringY
   const dist = Math.hypot(dx, dy)
   if (dist > RING_R) {
     const s = RING_R / dist
@@ -215,8 +144,7 @@ function onMouseOver(e) {
 }
 
 function setupCursor() {
-  reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  if (reduceMotion) return  // 减少动效：保留系统光标
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseover', onMouseOver)
   cursorRaf = requestAnimationFrame(cursorLoop)
@@ -228,61 +156,232 @@ function cleanupCursor() {
   if (cursorRaf) cancelAnimationFrame(cursorRaf)
 }
 
-// ---- 标题：字符化 + 悬停不规则扭曲 ----
-function splitTitleChars() {
-  const title = document.querySelector('.landing-title')
-  if (!title) return
-  title.querySelectorAll('.decode').forEach(el => {
-    const text = el.textContent
-    if (!text) return
-    el.textContent = ''
-    for (const ch of text) {
-      const s = document.createElement('span')
-      s.className = 'title-char'
-      // 动态创建的元素没有 scoped data 属性，scoped CSS 不生效，
-      // 必须内联 inline-block，否则 inline 元素的 transform 不生效（扭曲失效的根因）
-      s.style.display = 'inline-block'
-      s.textContent = ch === ' ' ? '\u00A0' : ch
-      el.appendChild(s)
-    }
-  })
+// ================= 眉标逐字符入场 =================
+function splitEyebrow(el) {
+  const text = el.textContent
+  el.textContent = ''
+  for (let i = 0; i < text.length; i++) {
+    const s = document.createElement('span')
+    s.className = 'eyebrow-char'
+    s.textContent = text[i] === ' ' ? '\u00A0' : text[i]
+    s.style.animationDelay = `${0.12 + i * 0.03}s`
+    el.appendChild(s)
+  }
 }
 
-function distortTitle(on) {
-  document.querySelectorAll('.landing-title .title-char').forEach(s => {
-    if (on) {
-      s.style.transform =
-        `translate(${(Math.random() * 2 - 1) * 7}px, ${(Math.random() * 2 - 1) * 5}px) ` +
-        `rotate(${(Math.random() * 2 - 1) * 9}deg) skewX(${(Math.random() * 2 - 1) * 8}deg)`
-      s.style.transition = 'transform 0.42s cubic-bezier(0.22, 1, 0.36, 1)'
+// ================= 循环打字机（副标题） =================
+function typeLoop(el, text, speed = 46, hold = 1800, eraseSpeed = 24) {
+  let i = 0
+  let deleting = false
+  const tick = () => {
+    el.textContent = text.slice(0, i)
+    if (!deleting) {
+      i++
+      if (i > text.length) { deleting = true; setTimeout(tick, hold); return }
+      setTimeout(tick, speed)
     } else {
-      s.style.transform = ''
+      i--
+      if (i < 0) { deleting = false; setTimeout(tick, 600); return }
+      setTimeout(tick, eraseSpeed)
     }
+  }
+  setTimeout(tick, 900)
+}
+
+// ================= 数字滚动 =================
+function countUp(el) {
+  const target = parseFloat(el.dataset.target)
+  const decimals = parseInt(el.dataset.decimals || '0', 10)
+  const dur = 1500
+  const t0 = performance.now()
+  const tick = now => {
+    const p = Math.min((now - t0) / dur, 1)
+    const eased = 1 - Math.pow(1 - p, 3)
+    el.textContent = (eased * target).toFixed(decimals)
+    if (p < 1) requestAnimationFrame(tick)
+    else el.textContent = target.toFixed(decimals)
+  }
+  requestAnimationFrame(tick)
+}
+
+// ================= Three.js 标题：GLSL 顶点涟漪 =================
+let threeCtx = null
+
+function showFallback() {
+  document.querySelector('.title-fallback')?.classList.add('show')
+  titleThreeWrap.value?.remove()
+}
+
+// 用系统字体把标题画到离屏 canvas，作为文字平面纹理（保留原生字体轮廓，支持中文）
+function makeTextTexture(text) {
+  const font = '800 110px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
+  const c = document.createElement('canvas')
+  const ctx = c.getContext('2d')
+  ctx.font = font
+  const lines = text.split('\n')
+  const lineH = 134
+  const pad = 26
+  c.width = Math.ceil(Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2)
+  c.height = Math.ceil(lines.length * lineH + pad)
+  ctx.font = font
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#f4f4f6'
+  lines.forEach((l, i) => ctx.fillText(l, c.width / 2, pad + (i + 0.5) * lineH))
+  const tex = new THREE.CanvasTexture(c)
+  tex.minFilter = THREE.LinearFilter
+  return tex
+}
+
+function setupThreeTitle() {
+  const wrap = titleThreeWrap.value
+  const titleEl = document.querySelector('.landing-title')
+  if (!wrap || !titleEl) return
+
+  // WebGL 支持检查，失败则回退 HTML 标题
+  try {
+    const t = document.createElement('canvas')
+    if (!(t.getContext('webgl') || t.getContext('experimental-webgl'))) return showFallback()
+  } catch {
+    return showFallback()
+  }
+
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  wrap.appendChild(renderer.domElement)
+
+  const scene = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50)
+  camera.position.z = 8
+
+  // 文字平面：宽 1 单位，高按纹理宽高比（局部坐标 x ∈ [-0.5, 0.5]）
+  const tex = makeTextTexture('TEACHING AGENTS\nTO PLAY')
+  const aspect = tex.image.width / tex.image.height
+  const geo = new THREE.PlaneGeometry(1, 1 / aspect, 180, 48)
+
+  // GLSL：顶点按到鼠标的距离做弹性涟漪（z 凸起），半径内越近越强，正弦波随时间流动
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      u_map: { value: tex },
+      u_mouse: { value: new THREE.Vector2(99, 99) }, // 鼠标在文字平面局部坐标
+      u_radius: { value: 0.42 },                     // 扰动半径（局部单位）
+      u_time: { value: 0 },
+    },
+    vertexShader: `
+      uniform vec2 u_mouse;
+      uniform float u_radius;
+      uniform float u_time;
+      varying vec2 v_uv;
+      varying float v_glow;
+      void main() {
+        v_uv = uv;
+        vec3 pos = position;
+        float d = distance(pos.xy, u_mouse);
+        // 半径内衰减：越近越强（falloff^2 更柔和）
+        float falloff = 1.0 - smoothstep(0.0, u_radius, d);
+        // 空间涟漪：沿距离的正弦波 + 时间流动，形成流体弹性
+        float wave = sin(d * 11.0 - u_time * 3.2) * 0.5 + 0.5;
+        float mag = falloff * falloff * wave;
+        pos.z += mag * 0.2;                  // 向屏幕外柔和鼓起
+        v_glow = falloff * (0.4 + wave * 0.6);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D u_map;
+      varying vec2 v_uv;
+      varying float v_glow;
+      void main() {
+        vec4 t = texture2D(u_map, v_uv);
+        if (t.a < 0.4) discard;              // 透明区裁掉，保留字体轮廓
+        // 淡紫霓虹：近鼠标处辉光 + 字形边缘紫边
+        float edge = 1.0 - smoothstep(0.35, 0.85, t.a);
+        vec3 neon = vec3(0.66, 0.55, 0.98);  // #a78bfa
+        vec3 col = t.rgb * 0.92 + neon * (v_glow * 0.55 + edge * 0.25);
+        gl_FragColor = vec4(col, t.a);
+      }
+    `,
   })
+
+  const mesh = new THREE.Mesh(geo, mat)
+  scene.add(mesh)
+
+  // 尺寸适配：让文字宽度占容器可视宽度的 ~86%
+  function resize() {
+    const rect = titleEl.getBoundingClientRect()
+    if (rect.width < 10 || rect.height < 10) return
+    renderer.setSize(rect.width, rect.height)
+    camera.aspect = rect.width / rect.height
+    const viewH = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z
+    const viewW = viewH * camera.aspect
+    const s = Math.max(viewW * 0.86, 0.1)
+    mesh.scale.setScalar(s)
+    camera.updateProjectionMatrix()
+  }
+  resize()
+  const ro = new ResizeObserver(resize)
+  ro.observe(titleEl)
+
+  // 鼠标：NDC → 世界（z=0 平面）→ 文字局部坐标（除以 mesh 缩放）
+  const raycaster = new THREE.Raycaster()
+  const ndc = new THREE.Vector2()
+  const zPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
+  const target = new THREE.Vector2(99, 99)
+  const cur = target.clone()
+  const onMove = e => {
+    const rect = wrap.getBoundingClientRect()
+    ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+    raycaster.setFromCamera(ndc, camera)
+    const pt = new THREE.Vector3()
+    if (raycaster.ray.intersectPlane(zPlane, pt)) {
+      const s = mesh.scale.x || 1
+      target.set(pt.x / s, pt.y / s)
+    }
+  }
+  const onLeave = () => target.set(99, 99)
+  wrap.addEventListener('pointermove', onMove)
+  wrap.addEventListener('pointerleave', onLeave)
+
+  // 动画循环：鼠标 lerp 平滑（弹性拖尾）、时间推进、渲染
+  const clock = new THREE.Clock()
+  function animate() {
+    threeCtx.raf = requestAnimationFrame(animate)
+    cur.lerp(target, 0.09)
+    mat.uniforms.u_mouse.value.copy(cur)
+    mat.uniforms.u_time.value = clock.getElapsedTime()
+    renderer.render(scene, camera)
+  }
+  animate()
+
+  threeCtx = {
+    renderer, scene, camera, mesh, mat, geo, tex, raf: null, ro,
+    listeners: [wrap, onMove, onLeave],
+  }
 }
 
-function setupTitle() {
-  const title = document.querySelector('.landing-title')
-  if (!title) return
-  title.addEventListener('mouseenter', () => distortTitle(true))
-  title.addEventListener('mouseleave', () => distortTitle(false))
+function cleanupThreeTitle() {
+  if (!threeCtx) return
+  cancelAnimationFrame(threeCtx.raf)
+  threeCtx.ro?.disconnect()
+  threeCtx.renderer.dispose()
+  threeCtx.geo.dispose()
+  threeCtx.mat.dispose()
+  threeCtx.tex.dispose()
+  threeCtx.renderer.domElement.remove()
+  threeCtx = null
 }
 
+// ================= 生命周期 =================
 onMounted(() => {
   const eyebrow = document.querySelector('.landing-eyebrow')
   if (eyebrow) splitEyebrow(eyebrow)
 
-  document.querySelectorAll('.decode[data-text]').forEach(decodeText)
-
   const typed = document.querySelector('.landing-typed .typed-text')
   if (typed) typeLoop(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
 
-  // 解码动画结束后字符化标题，供扭曲使用（decode 约 0.5s）
-  setTimeout(() => {
-    splitTitleChars()
-    setupTitle()
-  }, 1600)
-
+  setupThreeTitle()
   setupCursor()
 
   const io = new IntersectionObserver(entries => {
@@ -308,17 +407,17 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cleanupCursor()
+  cleanupThreeTitle()
 })
 </script>
 
 <style scoped>
 /* ===== 配色：黑底 + 白字 + 紫色强调（Web Tactics） ===== */
 .landing {
-  --lp-accent: #a78bfa;      /* 紫罗兰 */
-  --lp-accent-strong: #7c3aed;
-  --lp-bg: #0a0a0f;          /* 纯黑偏蓝 */
-  --lp-text: #f4f4f6;        /* 白 */
-  --lp-muted: #9aa0b0;       /* 灰 */
+  --lp-accent: #a78bfa;
+  --lp-bg: #0a0a0f;
+  --lp-text: #f4f4f6;
+  --lp-muted: #9aa0b0;
   --lp-line: rgba(167, 139, 250, 0.16);
 
   position: relative;
@@ -331,7 +430,6 @@ onBeforeUnmount(() => {
   cursor: none;             /* 隐藏系统光标，使用自定义光标 */
 }
 
-/* 背景：中心紫色光晕 + 极淡网格 */
 .landing-bg {
   position: absolute;
   inset: 0;
@@ -354,17 +452,9 @@ onBeforeUnmount(() => {
   padding: 22px 36px;
   border-bottom: 1px solid var(--lp-line);
 }
-.landing-logo {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
+.landing-logo { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
 .landing-logo-slash { color: var(--lp-accent); }
-.landing-tag {
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  color: var(--lp-muted);
-}
+.landing-tag { font-size: 11px; letter-spacing: 0.24em; color: var(--lp-muted); }
 
 /* Hero */
 .landing-hero {
@@ -374,14 +464,14 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 8vh 24px 5vh;
+  padding: 7vh 24px 5vh;
 }
 .landing-eyebrow {
   font-size: 11px;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--lp-accent);
-  margin-bottom: 24px;
+  margin-bottom: 22px;
 }
 .eyebrow-char {
   display: inline-block;
@@ -393,37 +483,35 @@ onBeforeUnmount(() => {
   to { opacity: 1; transform: none; }
 }
 
+/* 标题容器：Three.js canvas 绝对覆盖，h1 作为 WebGL 不可用时的回退 */
 .landing-title {
+  position: relative;
+  width: min(100%, 960px);
+  min-height: clamp(5.4rem, 16vw, 11.2rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.title-three {
+  position: absolute;
+  inset: 0;
+}
+.title-three canvas { display: block; width: 100% !important; height: 100% !important; }
+.title-fallback {
+  position: relative;
+  opacity: 0;
   font-size: clamp(2.6rem, 8vw, 5.6rem);
   font-weight: 800;
   line-height: 0.98;
   letter-spacing: 0.01em;
   text-transform: uppercase;
   color: var(--lp-text);
-  min-height: 2.1em;          /* 防止解码过程高度跳动 */
-  /* 立体感：多层浮雕投影 + 底部深影 + 紫色环境光 */
-  text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.09),
-    0 2px 0 rgba(0, 0, 0, 0.55),
-    0 4px 0 rgba(0, 0, 0, 0.35),
-    0 10px 18px rgba(0, 0, 0, 0.55),
-    0 18px 42px rgba(124, 58, 237, 0.28);
 }
-.landing-title em {
-  font-style: italic;
-  color: var(--lp-accent);
-  text-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.6),
-    0 3px 8px rgba(0, 0, 0, 0.6),
-    0 0 30px rgba(167, 139, 250, 0.5);
-}
-.title-char {
-  display: inline-block;
-  will-change: transform;
-}
+.title-fallback em { font-style: italic; color: var(--lp-accent); }
+.title-fallback.show { opacity: 1; }
 
 .landing-typed {
-  margin-top: 18px;
+  margin-top: 16px;
   font-size: clamp(0.95rem, 2.2vw, 1.35rem);
   font-weight: 600;
   letter-spacing: 0.28em;
@@ -439,14 +527,14 @@ onBeforeUnmount(() => {
 @keyframes blink { 50% { opacity: 0; } }
 
 .landing-sub {
-  margin-top: 22px;
+  margin-top: 20px;
   max-width: 46ch;
   font-size: 15px;
   line-height: 1.8;
   color: var(--lp-muted);
 }
 .landing-cta {
-  margin-top: 36px;
+  margin-top: 34px;
   display: flex;
   align-items: center;
   gap: 18px;
@@ -472,11 +560,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 22px rgba(167, 139, 250, 0.45);
 }
 .landing-btn:active { transform: scale(0.98); }
-.landing-hint {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  color: var(--lp-muted);
-}
+.landing-hint { font-size: 11px; letter-spacing: 0.18em; color: var(--lp-muted); }
 
 /* 滚动字幕条 */
 .landing-marquee {
@@ -488,11 +572,7 @@ onBeforeUnmount(() => {
   padding: 14px 0;
   background: rgba(124, 58, 237, 0.05);
 }
-.marquee-track {
-  display: flex;
-  width: max-content;
-  animation: marquee 26s linear infinite;
-}
+.marquee-track { display: flex; width: max-content; animation: marquee 26s linear infinite; }
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
@@ -524,25 +604,12 @@ onBeforeUnmount(() => {
   border: 1px solid var(--lp-line);
   background: var(--lp-line);
 }
-.stat {
-  background: var(--lp-bg);
-  padding: 28px 24px;
-  text-align: left;
-}
-.stat-num {
-  font-size: clamp(1.4rem, 3vw, 2.2rem);
-  font-weight: 700;
-  color: var(--lp-text);
-}
+.stat { background: var(--lp-bg); padding: 28px 24px; text-align: left; }
+.stat-num { font-size: clamp(1.4rem, 3vw, 2.2rem); font-weight: 700; color: var(--lp-text); }
 .stat-strong { color: var(--lp-accent); }
 .stat-dim { color: var(--lp-muted); }
 .stat-weak { color: #7d738f; }
-.stat-label {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--lp-muted);
-  letter-spacing: 0.04em;
-}
+.stat-label { margin-top: 10px; font-size: 12px; color: var(--lp-muted); letter-spacing: 0.04em; }
 
 /* 功能索引 */
 .landing-index {
@@ -565,23 +632,9 @@ onBeforeUnmount(() => {
   transition: background 0.2s ease;
 }
 .index-item:hover { background: rgba(124, 58, 237, 0.08); }
-.index-num {
-  font-size: 13px;
-  color: var(--lp-accent);
-  letter-spacing: 0.1em;
-  padding-top: 3px;
-}
-.index-name {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.index-desc {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--lp-muted);
-}
+.index-num { font-size: 13px; color: var(--lp-accent); letter-spacing: 0.1em; padding-top: 3px; }
+.index-name { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.index-desc { margin-top: 6px; font-size: 12px; color: var(--lp-muted); }
 
 /* 页脚 */
 .landing-foot {
@@ -606,41 +659,30 @@ onBeforeUnmount(() => {
   transform: translateY(26px);
   transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.reveal.in-view {
-  opacity: 1;
-  transform: none;
-}
+.reveal.in-view { opacity: 1; transform: none; }
 
 /* ===== 自定义光标 ===== */
-.cursor-dot,
-.cursor-ring {
+.cursor-dot, .cursor-ring {
   position: fixed;
-  top: 0;
-  left: 0;
+  top: 0; left: 0;
   pointer-events: none;
   z-index: 9999;
   border-radius: 50%;
   transform: translate(-50%, -50%);
 }
 .cursor-dot {
-  width: 8px;
-  height: 8px;
+  width: 8px; height: 8px;
   background: var(--lp-accent);
   transition: width 0.2s ease, height 0.2s ease, background 0.2s ease;
 }
 .cursor-ring {
-  width: 36px;
-  height: 36px;
+  width: 36px; height: 36px;
   border: 1px solid rgba(167, 139, 250, 0.7);
   transition: width 0.25s ease, height 0.25s ease, border-color 0.25s ease;
 }
-.cursor-dot.is-hover {
-  width: 10px;
-  height: 10px;
-}
+.cursor-dot.is-hover { width: 10px; height: 10px; }
 .cursor-ring.is-hover {
-  width: 56px;
-  height: 56px;
+  width: 56px; height: 56px;
   border-color: var(--lp-accent);
   border-style: dashed;
 }
@@ -648,7 +690,7 @@ onBeforeUnmount(() => {
 /* 响应式 */
 @media (max-width: 900px) {
   .landing-top { padding: 16px 20px; }
-  .landing-hero { padding-top: 7vh; }
+  .landing-hero { padding-top: 6vh; }
   .landing-stats { grid-template-columns: repeat(2, 1fr); margin: 0 20px; }
   .landing-index { grid-template-columns: 1fr; margin: 0 20px; }
   .landing-foot { padding: 16px 20px; }
@@ -661,7 +703,7 @@ onBeforeUnmount(() => {
   .landing-foot { opacity: 1; transform: none; animation: none; }
   .landing-marquee { display: none; }
   .eyebrow-char { opacity: 1; animation: none; }
-  .landing { cursor: auto; }       /* 恢复系统光标 */
+  .landing { cursor: auto; }
   .cursor-dot, .cursor-ring { display: none; }
 }
 </style>
