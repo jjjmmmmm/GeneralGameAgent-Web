@@ -279,7 +279,7 @@ function setupThreeTitle() {
     uniforms: {
       u_map: { value: tex },
       u_mouse: { value: new THREE.Vector2(99, 99) }, // 鼠标在文字平面局部坐标
-      u_radius: { value: 0.42 },                     // 扰动半径（局部单位）
+      u_radius: { value: 0.5 },                      // 扰动半径（局部单位，平面宽 1）
       u_time: { value: 0 },
     },
     vertexShader: `
@@ -295,9 +295,9 @@ function setupThreeTitle() {
         // 半径内衰减：越近越强（falloff^2 更柔和）
         float falloff = 1.0 - smoothstep(0.0, u_radius, d);
         // 空间涟漪：沿距离的正弦波 + 时间流动，形成流体弹性
-        float wave = sin(d * 11.0 - u_time * 3.2) * 0.5 + 0.5;
+        float wave = sin(d * 9.0 - u_time * 3.0) * 0.5 + 0.5;
         float mag = falloff * falloff * wave;
-        pos.z += mag * 0.2;                  // 向屏幕外柔和鼓起
+        pos.z += mag * 0.3;                  // 向屏幕外柔和鼓起（幅度增强）
         v_glow = falloff * (0.4 + wave * 0.6);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
       }
@@ -513,6 +513,7 @@ onBeforeUnmount(() => {
 .title-three canvas { display: block; width: 100% !important; height: 100% !important; }
 .title-fallback {
   position: relative;
+  pointer-events: none;   /* 透明回退标题不拦截鼠标事件，否则 canvas 收不到 pointermove，涟漪不触发 */
   opacity: 0;
   font-size: clamp(2.6rem, 8vw, 5.6rem);
   font-weight: 800;
