@@ -173,7 +173,7 @@ function typeLoop(el, text, speed = 46, hold = 1800, eraseSpeed = 24) {
       setTimeout(tick, speed)
     } else {
       i--
-      if (i < 0) { deleting = false; setTimeout(tick, 600); return }
+      if (i <= 0) { deleting = false; el.textContent = ''; setTimeout(tick, 600); return }
       setTimeout(tick, eraseSpeed)
     }
   }

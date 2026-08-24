@@ -99,7 +99,7 @@
           <div class="panel-head">
             <h2>动作曲线 · {{ versionLabel }}</h2>
             <div class="viewer-controls">
-              <select class="select num" v-model="segIdx" title="选择曲线段">
+              <select class="select num" v-model="segIdx" title="选择曲线段" v-if="segments.length">
                 <option v-for="(s, i) in segments" :key="s.start" :value="i">
                   {{ s.start }}s–{{ s.end }}s · seq_{{ String(s.start).padStart(3, '0') }}
                 </option>
@@ -579,6 +579,7 @@ async function loadCompare() {
 }
 
 function onVersionChange() {
+  segIdx.value = 0
   loadAll()
 }
 
