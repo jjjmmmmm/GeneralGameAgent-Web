@@ -236,17 +236,30 @@ function makeTextTexture(text) {
 function setupThreeTitle() {
   const wrap = titleThreeWrap.value
   const titleEl = document.querySelector('.landing-title')
-  if (!wrap || !titleEl) return
+  if (!wrap || !titleEl) { showFallback(); return }
 
-  // WebGL 支持检查，失败则回退 HTML 标题
+  // 防御：任何 Three/WebGL 初始化异常都回退 HTML 标题，且不阻断后续初始化
   try {
     const t = document.createElement('canvas')
-    if (!(t.getContext('webgl') || t.getContext('experimental-webgl'))) return showFallback()
-  } catch {
-    return showFallback()
+    if (!(t.getContext('webgl') || t.getContext('webgl2') || t.getContext('experimental-webgl'))) {
+      throw new Error('WebGL 不可用')
+    }
+  } catch (err) {
+    console.warn('[landing] three title disabled:', err)
+    showFallback()
+    return
   }
 
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
+  let renderer
+  try {
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
+    // shader 编译失败（不抛 JS 异常）也回退 HTML 标题，避免空白
+    renderer.debug.onShaderError = () => showFallback()
+  } catch (err) {
+    console.warn('[landing] three renderer failed:', err)
+    showFallback()
+    return
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   wrap.appendChild(renderer.domElement)
 
@@ -381,7 +394,8 @@ onMounted(() => {
   const typed = document.querySelector('.landing-typed .typed-text')
   if (typed) typeLoop(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
 
-  setupThreeTitle()
+  // 标题与光标解耦：Three 失败只回退标题，绝不阻断光标/滚动/计数
+  try { setupThreeTitle() } catch (err) { console.warn('[landing] three title failed:', err); showFallback() }
   setupCursor()
 
   const io = new IntersectionObserver(entries => {
