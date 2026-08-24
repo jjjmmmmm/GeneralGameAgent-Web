@@ -82,15 +82,22 @@
       <span>NITROGEN ADAPTATION · 2026</span>
       <span>M4 摇杆相关 0.13 &lt; 0.4 · 结果如实呈现</span>
     </footer>
+
+    <!-- 自定义光标：小点跟手，圆环滞后跟随且不离开小点 -->
+    <div class="cursor-dot" ref="cursorDot" aria-hidden="true"></div>
+    <div class="cursor-ring" ref="cursorRing" aria-hidden="true"></div>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 
-// Web Tactics 风格动效：标题解码、打字机、滚动揭示、数字滚动、字幕条。
+// Web Tactics 风格动效：标题解码、循环打字机、滚动揭示、数字滚动、字幕条、
+// 自定义光标（圆环滞后）、标题立体扭曲。
 // 全部在 onMounted 执行（Vue 渲染完成），元素通过类名选择，不依赖响应式数据。
 
+const cursorDot = ref(null)
+const cursorRing = ref(null)
 const DECODE_CHARS = '!<>-_\\/[]{}_=+*^?#&%$@'
 
 function decodeText(el) {
@@ -113,11 +120,29 @@ function decodeText(el) {
   tick()
 }
 
-function typeText(el, text, speed = 42) {
+// 循环打字机：打出 → 停住 → 删回 → 停顿 → 再打出
+function typeLoop(el, text, speed = 46, hold = 1800, eraseSpeed = 24) {
   let i = 0
+  let deleting = false
   const tick = () => {
-    el.textContent = text.slice(0, i++)
-    if (i <= text.length) setTimeout(tick, speed)
+    el.textContent = text.slice(0, i)
+    if (!deleting) {
+      i++
+      if (i > text.length) {
+        deleting = true
+        setTimeout(tick, hold)      // 打完整句后停留
+        return
+      }
+      setTimeout(tick, speed)
+    } else {
+      i--
+      if (i < 0) {
+        deleting = false
+        setTimeout(tick, 600)      // 删光后短暂停顿再重打
+        return
+      }
+      setTimeout(tick, eraseSpeed)
+    }
   }
   setTimeout(tick, 700)
 }
@@ -149,6 +174,97 @@ function splitEyebrow(el) {
   }
 }
 
+// ---- 自定义光标：小点跟手，圆环 lerp 滞后；小点始终不越过圆环 ----
+const RING_R = 18  // 圆环半径（小点到圆环中心的最大距离）
+let mouseX = -200, mouseY = -200
+let ringX = -200, ringY = -200
+let cursorRaf = null
+let reduceMotion = false
+
+function onMouseMove(e) {
+  mouseX = e.clientX
+  mouseY = e.clientY
+  if (cursorDot.value) {
+    cursorDot.value.style.left = mouseX + 'px'
+    cursorDot.value.style.top = mouseY + 'px'
+  }
+}
+
+function cursorLoop() {
+  if (!cursorRing.value) return
+  ringX += (mouseX - ringX) * 0.16
+  ringY += (mouseY - ringY) * 0.16
+  // 限制圆环中心与鼠标（小点）距离 ≤ RING_R：小点永远在圆环内
+  let dx = mouseX - ringX
+  let dy = mouseY - ringY
+  const dist = Math.hypot(dx, dy)
+  if (dist > RING_R) {
+    const s = RING_R / dist
+    ringX = mouseX - dx * s
+    ringY = mouseY - dy * s
+  }
+  cursorRing.value.style.left = ringX + 'px'
+  cursorRing.value.style.top = ringY + 'px'
+  cursorRaf = requestAnimationFrame(cursorLoop)
+}
+
+function onMouseOver(e) {
+  const interactive = e.target.closest('button, a, .index-item, .stat, .landing-btn')
+  cursorRing.value?.classList.toggle('is-hover', !!interactive)
+  cursorDot.value?.classList.toggle('is-hover', !!interactive)
+}
+
+function setupCursor() {
+  reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reduceMotion) return  // 减少动效：保留系统光标
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseover', onMouseOver)
+  cursorRaf = requestAnimationFrame(cursorLoop)
+}
+
+function cleanupCursor() {
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseover', onMouseOver)
+  if (cursorRaf) cancelAnimationFrame(cursorRaf)
+}
+
+// ---- 标题：字符化 + 悬停不规则扭曲 ----
+function splitTitleChars() {
+  const title = document.querySelector('.landing-title')
+  if (!title) return
+  title.querySelectorAll('.decode').forEach(el => {
+    const text = el.textContent
+    if (!text) return
+    el.textContent = ''
+    for (const ch of text) {
+      const s = document.createElement('span')
+      s.className = 'title-char'
+      s.textContent = ch === ' ' ? '\u00A0' : ch
+      el.appendChild(s)
+    }
+  })
+}
+
+function distortTitle(on) {
+  document.querySelectorAll('.landing-title .title-char').forEach(s => {
+    if (on) {
+      s.style.transform =
+        `translate(${(Math.random() * 2 - 1) * 7}px, ${(Math.random() * 2 - 1) * 5}px) ` +
+        `rotate(${(Math.random() * 2 - 1) * 9}deg) skewX(${(Math.random() * 2 - 1) * 8}deg)`
+      s.style.transition = 'transform 0.42s cubic-bezier(0.22, 1, 0.36, 1)'
+    } else {
+      s.style.transform = ''
+    }
+  })
+}
+
+function setupTitle() {
+  const title = document.querySelector('.landing-title')
+  if (!title) return
+  title.addEventListener('mouseenter', () => distortTitle(true))
+  title.addEventListener('mouseleave', () => distortTitle(false))
+}
+
 onMounted(() => {
   const eyebrow = document.querySelector('.landing-eyebrow')
   if (eyebrow) splitEyebrow(eyebrow)
@@ -156,7 +272,15 @@ onMounted(() => {
   document.querySelectorAll('.decode[data-text]').forEach(decodeText)
 
   const typed = document.querySelector('.landing-typed .typed-text')
-  if (typed) typeText(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
+  if (typed) typeLoop(typed, 'FROM ZERO-SHOT TO FINE-TUNED')
+
+  // 解码动画结束后字符化标题，供扭曲使用（decode 约 0.5s）
+  setTimeout(() => {
+    splitTitleChars()
+    setupTitle()
+  }, 1600)
+
+  setupCursor()
 
   const io = new IntersectionObserver(entries => {
     entries.forEach(e => {
@@ -178,6 +302,10 @@ onMounted(() => {
   }, { threshold: 0.4 })
   document.querySelectorAll('.count[data-target]').forEach(el => ioCount.observe(el))
 })
+
+onBeforeUnmount(() => {
+  cleanupCursor()
+})
 </script>
 
 <style scoped>
@@ -197,6 +325,7 @@ onMounted(() => {
   background: var(--lp-bg);
   color: var(--lp-text);
   overflow-x: hidden;
+  cursor: none;             /* 隐藏系统光标，使用自定义光标 */
 }
 
 /* 背景：中心紫色光晕 + 极淡网格 */
@@ -269,10 +398,25 @@ onMounted(() => {
   text-transform: uppercase;
   color: var(--lp-text);
   min-height: 2.1em;          /* 防止解码过程高度跳动 */
+  /* 立体感：多层浮雕投影 + 底部深影 + 紫色环境光 */
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.09),
+    0 2px 0 rgba(0, 0, 0, 0.55),
+    0 4px 0 rgba(0, 0, 0, 0.35),
+    0 10px 18px rgba(0, 0, 0, 0.55),
+    0 18px 42px rgba(124, 58, 237, 0.28);
 }
 .landing-title em {
   font-style: italic;
   color: var(--lp-accent);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 3px 8px rgba(0, 0, 0, 0.6),
+    0 0 30px rgba(167, 139, 250, 0.5);
+}
+.title-char {
+  display: inline-block;
+  will-change: transform;
 }
 
 .landing-typed {
@@ -464,6 +608,40 @@ onMounted(() => {
   transform: none;
 }
 
+/* ===== 自定义光标 ===== */
+.cursor-dot,
+.cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 9999;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.cursor-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--lp-accent);
+  transition: width 0.2s ease, height 0.2s ease, background 0.2s ease;
+}
+.cursor-ring {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(167, 139, 250, 0.7);
+  transition: width 0.25s ease, height 0.25s ease, border-color 0.25s ease;
+}
+.cursor-dot.is-hover {
+  width: 10px;
+  height: 10px;
+}
+.cursor-ring.is-hover {
+  width: 56px;
+  height: 56px;
+  border-color: var(--lp-accent);
+  border-style: dashed;
+}
+
 /* 响应式 */
 @media (max-width: 900px) {
   .landing-top { padding: 16px 20px; }
@@ -480,5 +658,7 @@ onMounted(() => {
   .landing-foot { opacity: 1; transform: none; animation: none; }
   .landing-marquee { display: none; }
   .eyebrow-char { opacity: 1; animation: none; }
+  .landing { cursor: auto; }       /* 恢复系统光标 */
+  .cursor-dot, .cursor-ring { display: none; }
 }
 </style>
