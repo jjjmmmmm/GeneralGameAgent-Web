@@ -1,6 +1,6 @@
 /* ===== 设计系统：评测工作台 =====
    深色操作台风：细边框 + 网格线，克制配色。
-   强调色（青绿）只用于数据层；状态色（绿/红）只用于达标判定。
+   强调色（紫罗兰）只用于数据层；状态色（绿/红）只用于达标判定。
    =============================== */
 
 :root {
@@ -12,8 +12,8 @@
   --text: #d7dde4;
   --text-dim: #8b97a5;
   --text-faint: #56606d;
-  --accent: #4fd1c5;
-  --accent-dim: rgba(79, 209, 197, 0.12);
+  --accent: #a78bfa;
+  --accent-dim: rgba(167, 139, 250, 0.12);
   --ok: #2ecc71;
   --fail: #ff5d5d;
   --mono: 'SFMono-Regular', 'Cascadia Code', Consolas, 'Roboto Mono', monospace;
