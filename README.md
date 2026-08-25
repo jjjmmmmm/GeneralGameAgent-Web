@@ -42,19 +42,35 @@ GeneralGameAgent-Web/
 
 ## 启动步骤
 
+### 一键启动（推荐）
+
+双击仓库根目录 **`start_web.bat`**，自动启动后端（:8000）+ 前端（:5173），就绪后打开浏览器 http://127.0.0.1:5173/。关闭窗口或 Ctrl+C 停止服务。日志：`backend/_uvicorn.log`、`frontend/_vite.log`。
+
 前置：课程 venv 已装 torch(cu128)/transformers/polars/peft/fastapi/uvicorn/python-multipart；前端已 `npm install`。
+
+### 手动启动
 
 ```powershell
 # 1) 后端（FastAPI，端口 8000；首次 /api/predict 懒加载 ng.pt 约 10s）
 cd D:\2+课产品\GeneralGameAgent-Web\GeneralGameAgent-Web\backend
 D:\2+课产品\GeneralGameAgent\GeneralGameAgent\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# 2) 前端（Vite dev，端口 5173，/api 代理到 8000）
+# 2) 前端（Vite dev，端口 5173，/api 代理到 8000；必须 --host 127.0.0.1 否则只监听 IPv6）
 cd ..\frontend
-npm run dev
+npm run dev -- --host 127.0.0.1
 ```
 
 打开 http://127.0.0.1:5173/
+
+### 克隆后图片还在吗？
+
+| 数据 | 是否入仓 | 克隆后 |
+|------|---------|--------|
+| 指标 JSON（`baseline.json` / `comparison.json` / `ft.json`） | ✅ 入仓 | 有——指标卡、曲线图、对比视图正常 |
+| 静态图 PNG（段图 `figures/curves/`、演示图 `figures/demo/`、分布图等） | ❌ 不入仓（体积大） | **无**——段图/演示条区为空 |
+| 素材工作台数据（`backend/data/assets/`，用户上传） | ❌ 不入仓 | 无 |
+
+本机恢复静态图：`cd backend && python scripts/sync_figures.py`（需课程 `results/figures` 与 `_data/frames` 存在）。克隆到新机器时无课程产物，需从原环境带图或重新生成。
 
 ## 训练与评测（可复现）
 
