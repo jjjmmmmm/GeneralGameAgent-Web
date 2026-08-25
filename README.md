@@ -62,15 +62,19 @@ npm run dev -- --host 127.0.0.1
 
 打开 http://127.0.0.1:5173/
 
-### 克隆后图片还在吗？
+### 克隆后（新机器）能看什么？
 
-| 数据 | 是否入仓 | 克隆后 |
-|------|---------|--------|
-| 指标 JSON（`baseline.json` / `comparison.json` / `ft.json`） | ✅ 入仓 | 有——指标卡、曲线图、对比视图正常 |
-| 静态图 PNG（段图 `figures/curves/`、演示图 `figures/demo/`、分布图等） | ❌ 不入仓（体积大） | **无**——段图/演示条区为空 |
-| 素材工作台数据（`backend/data/assets/`，用户上传） | ❌ 不入仓 | 无 |
+| 数据 | 入仓 | 克隆后 |
+|------|------|--------|
+| 指标 JSON（`baseline.json` / `comparison.json` / `ft.json`） | ✅ | 有——指标卡、曲线、对比视图正常 |
+| 静态图 PNG（段图 `figures/curves/`、演示图 `figures/demo/`、分布图，共 10.8MB） | ✅ | **有**——查看器段图/演示条完整 |
+| 素材工作台数据（`backend/data/assets/`，1.5GB） | ❌ | 无——功能可用，无预置素材 |
+| 模型权重 `ng.pt` / `ft_lora.pt`（3.8GB） | ❌ | 无——在线推理需手动部署 |
+| NitroGen 模块、数据集、视频、HF 视觉编码器缓存 | ❌ | 无——推理/训练需部署 |
 
-本机恢复静态图：`cd backend && python scripts/sync_figures.py`（需课程 `results/figures` 与 `_data/frames` 存在）。克隆到新机器时无课程产物，需从原环境带图或重新生成。
+**部署分层**：
+- **仅查看/对比**：clone + `npm install` + 课程 venv 即可，`start_web.bat` 一键启动，无需任何大文件。
+- **在线推理 / 素材评测**：需从原环境拷贝 `_models/ng.pt`、`train/ckpt/ft_lora.pt`、`../NitroGen/`、视频与 `_data/SHARD_0088/`，并确保 HF `siglip2-large-patch16-256` 有本地缓存（或首次联网加载）。
 
 ## 训练与评测（可复现）
 
