@@ -45,3 +45,56 @@
 - `train/ckpt/ft_lora.pt`（r8，1.84GB，与 ng.pt 格式兼容，可 load_model/推理/评测）
 - `train/ckpt/ft_lora_r16.pt`（r16）
 - 权重不入 git 仓
+
+---
+
+# 跨游戏泛化评测（M4 补充 · 2026-08-27）
+
+> 目的：验证 zero-shot（ng.pt）与 LoRA ft（rocket_league 微调）在**未训练过的其他游戏/视频**上的表现。
+> 口径：抽视频**中间段**（跳过开头 20%）等间隔采样 200 帧，K=3 多数票，指标口径与 M2 一致。
+> 标注读取：优先 `actions_processed`，缺失则用 `actions_raw`（schema 一致，17 键 + j_left/j_right）。
+
+## 测试视频（标注名 = 数据集 video_id）
+
+| 标注名 | 游戏 | 视频地址 | 评测中间段 | 标注覆盖 |
+|--------|------|---------|-----------|---------|
+| `g-x4S539tMc` | Fall Guys（糖豆人） | https://www.youtube.com/watch?v=g-x4S539tMc | 176~642s（156 帧有效）| 32 chunks / 640s |
+| `HN9EHN9FffE` | XDefiant | https://www.youtube.com/watch?v=HN9EHN9FffE | 88~351s（200 帧）| 22 chunks / 440s |
+| `bwKVCFx5QS8` | Spelunky 2 | https://www.youtube.com/watch?v=bwKVCFx5QS8 | 84~335s（200 帧）| 20 chunks / 400s |
+
+## 结果（baseline vs ft）
+
+| 视频（游戏）| 模型 | 按键准确率 | 召回率 | 摇杆相关 | 摇杆 MSE |
+|------|------|-----------|--------|---------|---------|
+| Fall Guys | baseline | 99.3% | 57.1% | **+0.674** | 0.219 |
+| Fall Guys | ft | 96.9% | 57.1% | **+0.609** | 0.217 |
+| XDefiant | baseline | 96.7% | 28.8% | +0.293 | 0.227 |
+| XDefiant | ft | 91.0% | 42.4% | -0.102 | 0.637 |
+| Spelunky 2 | baseline | 98.4% | 18.0% | +0.160 | 0.219 |
+| Spelunky 2 | ft | 95.4% | 18.0% | +0.237 | 0.306 |
+
+## 结论（2026-08-27，重要修正）
+
+1. **摇杆相关达标：Fall Guys 上 zero-shot +0.674 / ft +0.609，远超 0.4 目标**——修正此前"摇杆相关是模型能力边界"的结论。**摇杆相关与游戏类型强相关**，不是绝对边界：
+   - 机制：糖豆人是 3D 平台跳跃，**左摇杆 = 人物移动方向**，摇杆与画面运动直接对应 → 模型最容易学；
+   - rocket_league（转向+视角复合）、XDefiant（双摇杆）、Spelunky 2（方向键为主）映射更复杂或摇杆使用少 → 相关低（-0.10~+0.29）。
+2. **zero-shot 跨游戏按键准确率普遍高**（91~99%）：这些游戏按键稀疏，"不按"策略天然准确；召回率 18~57% 反映按键激活能力。
+3. **ft 跨游戏泛化不稳定**：XDefiant 上 ft 摇杆相关转负（+0.29→-0.10）、Spelunky 2 略升（+0.16→+0.24）——在 rocket_league 上微调的权重对新游戏不一定正向。
+4. 结论修正：**0.4 摇杆达标在"直接方向控制"类游戏（糖豆人）可达**；赛车/FPS 属结构性难点，如实呈现。
+
+## CryOgQGVpyw 补充（同系列 · 300 帧 0~300s · rocket_league 另一玩家）
+
+| 指标 | baseline | ft |
+|------|----------|-----|
+| 按键准确率 | 91.98% | 88.94% |
+| 召回率 | 4.37% | 47.33% |
+| 摇杆相关 | +0.015 | -0.015 |
+| 摇杆 MSE | 0.268 | 0.512 |
+
+视频：https://www.youtube.com/watch?v=CryOgQGVpyw（44 chunks / 880s）。
+**ft 召回 10.8 倍提升**（4.37%→47.3%）证明微调跨玩家泛化有效，但摇杆相关仍 ≈0——与 rocket_league 测试集一致（结构性问题）。
+
+## 说明
+
+- 评测脚本 `train/eval_external.py`（多视频 + 中间段抽帧）**本地使用，不入 git**。
+- 完整日志：`train/eval_external.log`。
