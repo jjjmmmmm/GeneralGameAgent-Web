@@ -40,6 +40,53 @@ GeneralGameAgent-Web/
 | 视频 | `D:/2+课产品/TOP 1 IN 2S _ Ranked 2v2 w_ oKhaliD (1).mp4` | 抽帧 |
 | NitroGen 模块 | `D:/2+课产品/NitroGen/` | 只读 import（不改源码） |
 
+## 从 0 搭建（新机器 / 新环境）
+
+> 代码使用**绝对路径约定**：本仓库位于 `D:/2+课产品/GeneralGameAgent-Web/GeneralGameAgent-Web`，外部资源位于 `D:/2+课产品/`（venv / `_models` / `_data` / `NitroGen` / 视频），路径硬编码在 `backend/app/inference.py`、`train/*.py`、`backend/scripts/start_web.py`。
+> **换机器时**：① 按下方"资源放置"搭出同构目录；② 或全局搜索替换代码中的 `D:/2+课产品` 为你的路径。
+
+### 1) Python 环境（Python 3.12，Blackwell 显卡需 PyTorch cu128）
+
+```powershell
+py -3.12 -m venv D:/2+课产品/GeneralGameAgent/GeneralGameAgent/.venv
+# 激活后安装：
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128   # RTX 50 系必需 cu128
+pip install transformers polars peft matplotlib
+cd <仓库>/backend && pip install -r requirements.txt   # fastapi/uvicorn/pytest/httpx/python-multipart
+```
+
+### 2) 资源获取（来源 + 放置，均不入 git）
+
+| 资源 | 来源 | 放置位置 |
+|------|------|---------|
+| NitroGen 模块 | `git clone https://github.com/MineDojo/NitroGen.git` | `D:/2+课产品/NitroGen/` |
+| 基座模型 `ng.pt`（1.97GB） | HF 模型库 `nvidia/NitroGen`（单文件 `ng.pt`） | `D:/2+课产品/_models/ng.pt` |
+| 数据集分片 `SHARD_0088`（4GB tar） | HF 数据集 `nvidia/NitroGen`（`SHARD_0088.tar`） | `D:/2+课产品/_data/SHARD_0088/`，只需保留 `Z1r1S--MJS4/` |
+| 原始视频（703.8s） | YouTube `https://www.youtube.com/watch?v=Z1r1S--MJS4`（即分片 `metadata.json` 的 `original_video.url`） | 文件名**必须**为 `TOP 1 IN 2S _ Ranked 2v2 w_ oKhaliD (1).mp4`，放 `D:/2+课产品/` |
+| siglip2 视觉编码器 | HF `google/siglip2-large-patch16-256` | 首次加载自动下载（联网；无代理用 hf-mirror） |
+| 微调模型 `ft_lora.pt`（2GB） | 本项目训练产物：从原机器拷贝，或跑 `train/train_lora.py` 重新训练 | `<仓库>/train/ckpt/ft_lora.pt` |
+
+```powershell
+# 下载命令示例（hf 需网络；无梯子先设 $env:HF_ENDPOINT="https://hf-mirror.com"）
+huggingface-cli download nvidia/NitroGen ng.pt --local-dir D:/2+课产品/_models
+huggingface-cli download nvidia/NitroGen SHARD_0088.tar --repo-type dataset --local-dir D:/2+课产品/_data
+tar -xf D:/2+课产品/_data/SHARD_0088.tar -C D:/2+课产品/_data   # 解压出 SHARD_0088/
+
+# 视频（yt-dlp；YouTube 限流时可按课程方法用 cookies）
+yt-dlp -f "bv*[height<=1080]+ba/b[height<=1080]" -o "D:/2+课产品/TOP 1 IN 2S _ Ranked 2v2 w_ oKhaliD (1).mp4" "https://www.youtube.com/watch?v=Z1r1S--MJS4"
+```
+
+> **注意**：数据集只含动作标注（parquet + metadata），**不含视频帧**；帧需用 ffmpeg 从视频抽取（`帧号 = chunk_id × 1200 + 行号`，秒 = 帧号/60）。`metadata.json` 含 `bbox_controller_overlay`（画面手柄遮挡框）。
+
+### 3) 前端依赖
+
+```powershell
+cd <仓库>/frontend
+npm install   # 仅 vue + echarts + vite
+```
+
+依赖就绪后进入下方启动步骤。
+
 ## 启动步骤
 
 ### 一键启动（推荐）
