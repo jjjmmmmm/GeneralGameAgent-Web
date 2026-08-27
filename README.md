@@ -47,7 +47,7 @@ GeneralGameAgent-Web/
 | 资源 | 位置 | 用途 |
 |------|------|------|
 | ng.pt 权重 | `D:/2+课产品/_models/ng.pt` | 微调基座（493M，float32） |
-| 数据集 | `D:/2+课产品/_data/SHARD_0088/Z1r1S--MJS4/` | 训练（chunk 0~31）/ 测试（chunk 32~34）标注 |
+| 数据集 | `D:/2+课产品/_data/SHARD_0088/Z1r1S--MJS4/` | 训练（chunk 0-31）/ 测试（chunk 32-34）标注 |
 | 视频 | `D:/2+课产品/TOP 1 IN 2S _ Ranked 2v2 w_ oKhaliD (1).mp4` | 抽帧 |
 | NitroGen 模块 | `D:/2+课产品/NitroGen/` | 只读 import（不改源码） |
 
